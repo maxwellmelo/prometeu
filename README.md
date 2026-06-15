@@ -33,7 +33,8 @@ This isn't fast. It isn't groundbreaking. It's a proof that **you can run distri
 |---|---|
 | `llama-server` (master) | OpenAI-compatible HTTP API, loads model, orchestrates RPC |
 | `rpc-server` (workers) | Hosts a slice of the model's tensor graph, computes on demand |
-| FastAPI gateway | Thin proxy + node telemetry (`/api/nodes`) |
+| FastAPI gateway | Thin proxy + cluster telemetry (`/api/nodes`) |
+| Node Agent | Per-node CPU/RAM/network/process telemetry on `:9100` |
 | HTML/JS frontend | Minimal chat UI with SSE streaming and live node badges |
 | Cloudflare Tunnel | Public HTTPS without opening firewall ports |
 
@@ -97,6 +98,26 @@ curl http://localhost:3000/api/nodes
 ```
 
 The gateway is a thin proxy — every endpoint llama-server exposes (chat, completions, embeddings, OpenAI-compatible) passes through.
+
+## Prove the work is really distributed
+
+The live dashboard shows per-node CPU/RAM/network and TCP connection counts.
+For a CLI proof, run:
+
+```bash
+bash scripts/prove-distribution.sh https://prometeu.mx3dev.com
+```
+
+Example result during a 120-token request:
+
+```txt
+node,cpu%,rx_mbps,tx_mbps,tcp,active,verdict
+master,5.2,8.420,3.613,1,True,OK
+worker1,10.0,2.236,4.509,1,True,OK
+worker2,5.2,1.371,3.907,1,True,OK
+```
+
+If workers show CPU/network/TCP activity while the request is running, the forward pass is hitting those nodes.
 
 ## OpenAI-compatible API
 

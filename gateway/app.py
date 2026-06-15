@@ -64,12 +64,23 @@ NODES: list[dict] = _cfg["nodes"]
 node_status_cache: dict[str, Any] = {"checked_at": 0, "nodes": []}
 
 
+async def _fetch_agent(host: str) -> dict[str, Any] | None:
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as c:
+            r = await c.get(f"http://{host}:9100/status")
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        return None
+    return None
+
+
 async def refresh_nodes() -> list[dict]:
     """
-    llama-server (master) tem RPC ativo com workers — se /health=ok, todos os nós
-    estão produtivos por definição (RPC é sincronia, falha de qualquer worker
-    mataria o servidor inteiro). Probe TCP direto dos workers é inviável porque
-    rpc-server tem backlog=1 e enfileira conexões durante inferência ativa.
+    Health has two layers:
+    - cluster_ok: llama-server says model+RPC graph are alive.
+    - agent: per-node telemetry (CPU/RAM/network/process), used to prove workers
+      are doing real work during inference.
     """
     master_ok = False
     try:
@@ -79,14 +90,22 @@ async def refresh_nodes() -> list[dict]:
     except Exception:
         master_ok = False
 
+    agents = await asyncio.gather(*[_fetch_agent(n["host"]) for n in NODES])
+
     out = []
-    for n in NODES:
+    for n, agent in zip(NODES, agents):
+        process_alive = bool(agent.get("process_alive")) if agent else None
+        alive = bool(master_ok and (process_alive is not False))
         out.append({
             "id": n["id"],
             "host": n["host"],
             "port": n["port"],
             "role": n["role"],
-            "alive": master_ok,
+            "layers": n.get("layers"),
+            "alive": alive,
+            "cluster_ok": master_ok,
+            "agent_ok": agent is not None,
+            "telemetry": agent,
         })
     node_status_cache["nodes"] = out
     node_status_cache["checked_at"] = time.time()
