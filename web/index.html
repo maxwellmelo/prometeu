@@ -93,7 +93,7 @@
 </main>
 
 <footer>
-  Prometeu MVP · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/health" target="_blank">/api/health</a>
+  Prometeu MVP · <span id="pool">pool público: —</span> · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/registry/nodes" target="_blank">/api/registry/nodes</a> · <a href="/api/health" target="_blank">/api/health</a>
 </footer>
 
 <script>
@@ -102,6 +102,7 @@ const form = document.getElementById("form");
 const input = document.getElementById("input");
 const send = document.getElementById("send");
 const nodesEl = document.getElementById("nodes");
+const poolEl = document.getElementById("pool");
 
 let history = [
   { role: "system", content: "Você é um assistente útil rodando em um cluster distribuído de 3 computadores. Responda de forma clara e concisa em português brasileiro." }
@@ -137,8 +138,17 @@ async function refreshNodes() {
     }).join("");
   } catch (e) {}
 }
+async function refreshPool() {
+  try {
+    const r = await fetch("/api/registry/nodes", { cache: "no-store" });
+    const d = await r.json();
+    poolEl.textContent = `pool público: ${d.online}/${d.total} nodes registrados`;
+  } catch (e) {}
+}
 refreshNodes();
+refreshPool();
 setInterval(refreshNodes, 1000);
+setInterval(refreshPool, 5000);
 
 function addMsg(role, text) {
   if (chat.querySelector(".empty")) chat.querySelector(".empty").remove();

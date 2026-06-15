@@ -1,0 +1,16 @@
+[Unit]
+Description=Prometeu Public Node daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/prometeu-node
+Environment=PROMETEU_NODE_CONFIG=/etc/prometeu-node/config.json
+Environment=PROMETEU_NODE_WEB_DIR=/opt/prometeu-node/web
+ExecStart=/opt/prometeu-node/venv/bin/uvicorn prometeu_node.main:app --host 0.0.0.0 --port 8787
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
