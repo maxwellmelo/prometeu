@@ -145,13 +145,35 @@ scripts/      install + build scripts, systemd units
 docs/         design notes
 ```
 
-## Roadmap (maybe)
+## Public worker pool (experimental)
 
-- [ ] Prometheus `/metrics` endpoint
+Sprint 2A adds a participant-facing daemon:
+
+```bash
+sudo bash node/install.sh https://prometeu.mx3dev.com
+```
+
+It opens a local dashboard on `http://localhost:8787`, detects hardware, lets the participant choose CPU/RAM/bandwidth/model limits, and heartbeats into the coordinator registry:
+
+```txt
+POST /api/registry/join
+POST /api/registry/heartbeat
+GET  /api/registry/nodes
+POST /api/registry/leave
+```
+
+Important: this phase only registers capacity. It does **not** route public inference to volunteer nodes yet. Public serving needs an overlay network (WireGuard-style) plus layer assignment and trust/reputation.
+
+## Roadmap
+
+- [x] Fixed 3-node distributed inference proof
+- [x] Per-node telemetry agent and proof script
+- [x] Public node registry + local node dashboard
+- [ ] WireGuard overlay so nodes can join without opening ports
+- [ ] Coordinator layer scheduler / auto-split
 - [ ] Per-IP rate limit (slowapi)
-- [ ] Heterogeneous workers (one with a tiny GPU)
-- [ ] Voluntary public worker pool — anyone can donate idle CPU cycles
-- [ ] Larger models (Qwen 7B Q4 = 4.4 GB; needs a 4th node or a fatter master)
+- [ ] Heterogeneous workers (one CPU + one tiny GPU)
+- [ ] Larger models (Qwen 7B Q4 = 4.4 GB; needs more RAM/nodes)
 
 ## License
 

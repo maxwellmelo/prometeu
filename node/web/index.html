@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Prometeu Node</title>
+<style>
+:root{--bg:#0b0d12;--panel:#11141b;--line:#1d2230;--text:#e6e9ef;--muted:#7a8294;--accent:#ff8a3d;--ok:#4ade80;--bad:#ef4444}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif} main{max-width:980px;margin:0 auto;padding:20px} h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}.k{color:var(--muted);font-size:12px}.v{font-size:20px;font-weight:800}.ok{color:var(--ok)}.bad{color:var(--bad)} label{display:block;color:var(--muted);font-size:12px;margin-top:10px} input,select{width:100%;background:#0f1219;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px} button{background:var(--accent);color:#1a0d05;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;margin-top:12px} pre{white-space:pre-wrap;overflow:auto;background:#090b10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px}.row{display:flex;gap:10px;align-items:center;justify-content:space-between}.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);display:inline-block}.dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+</style>
+</head>
+<body><main>
+  <h1>Prometeu Node</h1>
+  <div class="sub">Dashboard local do participante. Este node registra capacidade no coordinator; inferência pública vem na próxima fase.</div>
+
+  <div class="grid">
+    <div class="card"><div class="row"><div><div class="k">Status coordinator</div><div class="v" id="hb">—</div></div><span class="dot" id="dot"></span></div></div>
+    <div class="card"><div class="k">Node ID</div><div class="v" id="nodeId">—</div></div>
+    <div class="card"><div class="k">CPU</div><div class="v" id="cpu">—</div></div>
+    <div class="card"><div class="k">RAM</div><div class="v" id="ram">—</div></div>
+    <div class="card"><div class="k">Rede total</div><div class="v" id="net">—</div></div>
+    <div class="card"><div class="k">Modelos</div><div class="v" id="models">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h3>Configuração</h3>
+    <label>Nome do node</label><input id="displayName">
+    <label>Modo</label><select id="mode"><option value="public">public</option><option value="private">private</option><option value="idle-only">idle-only</option></select>
+    <label>Status</label><select id="status"><option value="available">available</option><option value="paused">paused</option><option value="offline">offline</option></select>
+    <label>Modelos aceitos (vírgula)</label><input id="modelsInput">
+    <label>CPU max %</label><input id="cpuLimit" type="number" min="1" max="100">
+    <label>RAM max MB</label><input id="ramLimit" type="number" min="128">
+    <label>Banda max Mbps</label><input id="bwLimit" type="number" min="1">
+    <button onclick="save()">Salvar + heartbeat</button>
+    <button onclick="heartbeat()">Enviar heartbeat agora</button>
+  </div>
+
+  <div class="card" style="margin-top:14px"><h3>Raw status</h3><pre id="raw">{}</pre></div>
+</main>
+<script>
+let last=null;
+function $(id){return document.getElementById(id)}
+function fmt(n,u=''){return typeof n==='number'?`${n.toFixed(n>=10?0:1)}${u}`:'—'}
+async function load(){
+  const r=await fetch('/api/status',{cache:'no-store'}); const d=await r.json(); last=d;
+  const c=d.config, h=d.hardware, t=d.telemetry, hb=d.heartbeat;
+  $('nodeId').textContent=c.node_id; $('cpu').textContent=fmt(t.cpu_percent,'%')+` / ${h.cpu_count} cores`; $('ram').textContent=`${t.ram_used_mb}MB (${fmt(t.ram_percent,'%')})`; $('net').textContent=`RX ${t.net_total_rx_mb}MB · TX ${t.net_total_tx_mb}MB`; $('models').textContent=(c.models||[]).join(', ');
+  $('hb').textContent=hb.ok?'online':'erro'; $('hb').className='v '+(hb.ok?'ok':'bad'); $('dot').className='dot '+(hb.ok?'on':'');
+  $('displayName').value=c.display_name||''; $('mode').value=c.mode||'public'; $('status').value=c.status||'available'; $('modelsInput').value=(c.models||[]).join(','); $('cpuLimit').value=c.limits?.cpu_percent||50; $('ramLimit').value=c.limits?.ram_mb||1024; $('bwLimit').value=c.limits?.bandwidth_mbps||20;
+  $('raw').textContent=JSON.stringify(d,null,2);
+}
+async function save(){
+  const payload={display_name:$('displayName').value,mode:$('mode').value,status:$('status').value,models:$('modelsInput').value.split(',').map(s=>s.trim()).filter(Boolean),limits:{cpu_percent:Number($('cpuLimit').value),ram_mb:Number($('ramLimit').value),bandwidth_mbps:Number($('bwLimit').value)}};
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); await heartbeat(); await load();
+}
+async function heartbeat(){await fetch('/api/heartbeat',{method:'POST'}).catch(()=>{}); await load();}
+load(); setInterval(load,3000);
+</script></body></html>
