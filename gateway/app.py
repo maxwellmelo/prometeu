@@ -23,13 +23,13 @@ Config JSON formato:
 import asyncio
 import json
 import os
-import sqlite3
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
+import redis.asyncio as redis
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,10 +62,13 @@ _cfg_path = _find_config()
 _cfg = json.loads(_cfg_path.read_text())
 MODEL_NAME: str = _cfg["model_name"]
 NODES: list[dict] = _cfg["nodes"]
-REGISTRY_DB = Path(os.getenv("PROMETEU_REGISTRY_DB", "/opt/prometeu/registry.db"))
 REGISTRY_TTL_SEC = int(os.getenv("PROMETEU_REGISTRY_TTL_SEC", "120"))
+REDIS_URL = os.getenv("PROMETEU_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_NODE_PREFIX = "prometeu:nodes:"
+REDIS_NODE_INDEX = "prometeu:nodes:index"
 
 node_status_cache: dict[str, Any] = {"checked_at": 0, "nodes": []}
+redis_client: redis.Redis | None = None
 
 
 class NodeJoin(BaseModel):
@@ -86,95 +89,71 @@ class NodeHeartbeat(NodeJoin):
     pass
 
 
-def _db() -> sqlite3.Connection:
-    REGISTRY_DB.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(REGISTRY_DB)
-    con.row_factory = sqlite3.Row
-    return con
+def _redis() -> redis.Redis:
+    if redis_client is None:
+        raise RuntimeError("Redis not initialized")
+    return redis_client
 
 
-def init_registry() -> None:
-    with _db() as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS public_nodes (
-                node_id TEXT PRIMARY KEY,
-                display_name TEXT,
-                version TEXT,
-                public_key TEXT,
-                mode TEXT,
-                models_json TEXT,
-                limits_json TEXT,
-                hardware_json TEXT,
-                status TEXT,
-                dashboard_url TEXT,
-                rpc_endpoint TEXT,
-                first_seen REAL,
-                last_seen REAL
-            )
-            """
-        )
-        con.commit()
+async def init_registry() -> None:
+    global redis_client
+    if redis_client is None:
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    await redis_client.ping()
 
 
-def _upsert_node(payload: NodeJoin) -> dict[str, Any]:
+def _node_key(node_id: str) -> str:
+    return f"{REDIS_NODE_PREFIX}{node_id}"
+
+
+async def _upsert_node(payload: NodeJoin) -> dict[str, Any]:
+    r = _redis()
     now = time.time()
-    with _db() as con:
-        old = con.execute("SELECT first_seen FROM public_nodes WHERE node_id=?", (payload.node_id,)).fetchone()
-        first_seen = float(old["first_seen"]) if old else now
-        con.execute(
-            """
-            INSERT INTO public_nodes (
-                node_id, display_name, version, public_key, mode, models_json,
-                limits_json, hardware_json, status, dashboard_url, rpc_endpoint,
-                first_seen, last_seen
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(node_id) DO UPDATE SET
-                display_name=excluded.display_name,
-                version=excluded.version,
-                public_key=excluded.public_key,
-                mode=excluded.mode,
-                models_json=excluded.models_json,
-                limits_json=excluded.limits_json,
-                hardware_json=excluded.hardware_json,
-                status=excluded.status,
-                dashboard_url=excluded.dashboard_url,
-                rpc_endpoint=excluded.rpc_endpoint,
-                last_seen=excluded.last_seen
-            """,
-            (
-                payload.node_id, payload.display_name, payload.version,
-                payload.public_key, payload.mode, json.dumps(payload.models),
-                json.dumps(payload.limits), json.dumps(payload.hardware),
-                payload.status, payload.dashboard_url, payload.rpc_endpoint,
-                first_seen, now,
-            ),
-        )
-        con.commit()
-    return {"ok": True, "node_id": payload.node_id, "first_seen": first_seen, "last_seen": now}
+    key = _node_key(payload.node_id)
+    old_raw = await r.get(key)
+    first_seen = now
+    if old_raw:
+        try:
+            first_seen = float(json.loads(old_raw).get("first_seen", now))
+        except Exception:
+            first_seen = now
+    data = payload.model_dump()
+    data.update({
+        "first_seen": first_seen,
+        "last_seen": now,
+    })
+    await r.set(key, json.dumps(data), ex=REGISTRY_TTL_SEC)
+    await r.sadd(REDIS_NODE_INDEX, payload.node_id)
+    return {"ok": True, "node_id": payload.node_id, "backend": "redis", "first_seen": first_seen, "last_seen": now}
 
 
-def _rows_to_nodes(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+async def _list_registry_nodes() -> list[dict[str, Any]]:
+    r = _redis()
     now = time.time()
-    nodes = []
-    for r in rows:
-        last_seen = float(r["last_seen"] or 0)
-        nodes.append({
-            "node_id": r["node_id"],
-            "display_name": r["display_name"],
-            "version": r["version"],
-            "mode": r["mode"],
-            "models": json.loads(r["models_json"] or "[]"),
-            "limits": json.loads(r["limits_json"] or "{}"),
-            "hardware": json.loads(r["hardware_json"] or "{}"),
-            "status": r["status"],
-            "dashboard_url": r["dashboard_url"],
-            "rpc_endpoint": r["rpc_endpoint"],
-            "first_seen": r["first_seen"],
-            "last_seen": last_seen,
-            "age_sec": round(now - last_seen, 1),
-            "online": (now - last_seen) <= REGISTRY_TTL_SEC,
-        })
+    node_ids = sorted(await r.smembers(REDIS_NODE_INDEX))
+    nodes: list[dict[str, Any]] = []
+    stale: list[str] = []
+    if not node_ids:
+        return nodes
+    values = await r.mget([_node_key(nid) for nid in node_ids])
+    for node_id, raw in zip(node_ids, values):
+        if raw is None:
+            stale.append(node_id)
+            continue
+        try:
+            n = json.loads(raw)
+        except Exception:
+            stale.append(node_id)
+            continue
+        last_seen = float(n.get("last_seen") or 0)
+        ttl = await r.ttl(_node_key(node_id))
+        n["age_sec"] = round(now - last_seen, 1)
+        n["ttl_sec"] = ttl
+        n["online"] = ttl > 0 and n.get("status") != "offline"
+        nodes.append(n)
+    if stale:
+        await r.srem(REDIS_NODE_INDEX, *stale)
+    nodes.sort(key=lambda n: n.get("last_seen", 0), reverse=True)
     return nodes
 
 
@@ -228,7 +207,7 @@ async def refresh_nodes() -> list[dict]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_registry()
+    await init_registry()
     await refresh_nodes()
 
     async def loop():
@@ -273,12 +252,12 @@ async def api_health():
 
 @app.post("/api/registry/join")
 async def registry_join(payload: NodeJoin):
-    return _upsert_node(payload)
+    return await _upsert_node(payload)
 
 
 @app.post("/api/registry/heartbeat")
 async def registry_heartbeat(payload: NodeHeartbeat):
-    return _upsert_node(payload)
+    return await _upsert_node(payload)
 
 
 @app.post("/api/registry/leave")
@@ -286,19 +265,18 @@ async def registry_leave(payload: dict[str, Any]):
     node_id = str(payload.get("node_id", ""))
     if not node_id:
         return JSONResponse({"ok": False, "error": "node_id required"}, status_code=400)
-    with _db() as con:
-        con.execute("UPDATE public_nodes SET status=?, last_seen=? WHERE node_id=?", ("offline", time.time(), node_id))
-        con.commit()
-    return {"ok": True, "node_id": node_id}
+    r = _redis()
+    await r.delete(_node_key(node_id))
+    await r.srem(REDIS_NODE_INDEX, node_id)
+    return {"ok": True, "node_id": node_id, "backend": "redis"}
 
 
 @app.get("/api/registry/nodes")
 async def registry_nodes():
-    init_registry()
-    with _db() as con:
-        rows = con.execute("SELECT * FROM public_nodes ORDER BY last_seen DESC").fetchall()
-    nodes = _rows_to_nodes(rows)
+    await init_registry()
+    nodes = await _list_registry_nodes()
     return {
+        "backend": "redis",
         "nodes": nodes,
         "total": len(nodes),
         "online": sum(1 for n in nodes if n["online"] and n["status"] != "offline"),

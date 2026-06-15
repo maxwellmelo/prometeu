@@ -153,7 +153,7 @@ Sprint 2A adds a participant-facing daemon:
 sudo bash node/install.sh https://prometeu.mx3dev.com
 ```
 
-It opens a local dashboard on `http://localhost:8787`, detects hardware, lets the participant choose CPU/RAM/bandwidth/model limits, and heartbeats into the coordinator registry:
+It opens a local dashboard on `http://localhost:8787`, detects hardware, lets the participant choose CPU/RAM/bandwidth/model limits, and heartbeats into the coordinator registry. Registry state is stored in Redis with TTL-based presence (`PROMETEU_REDIS_URL`, default `redis://127.0.0.1:6379/0`):
 
 ```txt
 POST /api/registry/join
