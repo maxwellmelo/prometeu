@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Prometeu — LLM Distribuído</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #11141b;
+    --line: #1d2230;
+    --text: #e6e9ef;
+    --mute: #7a8294;
+    --accent: #ff8a3d;
+    --ok: #4ade80;
+    --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #ff5e3a);
+    display: grid; place-items: center; font-weight: 800; color: #1a0d05;
+  }
+  h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+  .sub { color: var(--mute); font-size: 12px; }
+  .nodes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .node {
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px;
+    font-size: 12px; display: flex; align-items: center; gap: 8px; background: var(--panel);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  .node.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  main { flex: 1; display: flex; flex-direction: column; max-width: 820px; width: 100%; margin: 0 auto; padding: 16px; gap: 12px; }
+  #chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px 24px; }
+  .msg { padding: 12px 14px; border-radius: 12px; max-width: 88%; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { background: #1c2230; align-self: flex-end; }
+  .msg.bot { background: var(--panel); border: 1px solid var(--line); align-self: flex-start; }
+  .msg.bot .meta { font-size: 11px; color: var(--mute); margin-top: 8px; }
+  .composer { display: flex; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: var(--panel); }
+  textarea {
+    flex: 1; border: 0; outline: 0; background: transparent; color: var(--text);
+    resize: none; font: inherit; min-height: 44px; max-height: 200px;
+  }
+  button {
+    border: 0; border-radius: 10px; padding: 0 18px; background: var(--accent); color: #1a0d05;
+    font-weight: 700; cursor: pointer; font-size: 14px;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  footer { text-align: center; color: var(--mute); font-size: 11px; padding: 12px; border-top: 1px solid var(--line); }
+  a { color: var(--accent); text-decoration: none; }
+  .empty { color: var(--mute); text-align: center; padding: 40px 16px; }
+  .badge { display: inline-block; padding: 2px 8px; background: #1c2230; border-radius: 999px; font-size: 11px; color: var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">P</div>
+    <div>
+      <h1>Prometeu</h1>
+      <div class="sub">LLM open-source rodando distribuído em hardware doméstico</div>
+    </div>
+  </div>
+  <div class="nodes" id="nodes"></div>
+</header>
+
+<main>
+  <div id="chat">
+    <div class="empty">
+      <p>👋 Olá! Sou um modelo Qwen 2.5 1.5B rodando em <strong>3 nós distribuídos</strong> via llama.cpp RPC.</p>
+      <p>Cada token desta conversa vai passar por todos os 3 computadores antes de chegar até você.</p>
+      <p>Faça uma pergunta abaixo. <span class="badge">Sem cadastro · grátis · open-source</span></p>
+    </div>
+  </div>
+  <form class="composer" id="form">
+    <textarea id="input" placeholder="Pergunte qualquer coisa…" rows="2"></textarea>
+    <button type="submit" id="send">Enviar</button>
+  </form>
+</main>
+
+<footer>
+  Prometeu MVP · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/health" target="_blank">/api/health</a>
+</footer>
+
+<script>
+const chat = document.getElementById("chat");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const send = document.getElementById("send");
+const nodesEl = document.getElementById("nodes");
+
+let history = [
+  { role: "system", content: "Você é um assistente útil rodando em um cluster distribuído de 3 computadores. Responda de forma clara e concisa em português brasileiro." }
+];
+
+async function refreshNodes() {
+  try {
+    const r = await fetch("/api/nodes", { cache: "no-store" });
+    const d = await r.json();
+    nodesEl.innerHTML = d.nodes.map(n =>
+      `<div class="node ${n.alive ? "ok" : ""}" title="${n.role}">
+         <span class="dot"></span>
+         <span>${n.id} · ${n.host}:${n.port}</span>
+       </div>`
+    ).join("");
+  } catch (e) {}
+}
+refreshNodes();
+setInterval(refreshNodes, 4000);
+
+function addMsg(role, text) {
+  if (chat.querySelector(".empty")) chat.querySelector(".empty").remove();
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+async function chatStream(userText) {
+  history.push({ role: "user", content: userText });
+  addMsg("user", userText);
+  const botDiv = addMsg("bot", "");
+  botDiv.textContent = "…";
+
+  const startedAt = performance.now();
+  let firstTokenAt = null;
+  let tokens = 0;
+
+  const resp = await fetch("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "qwen",
+      messages: history,
+      stream: true,
+      max_tokens: 400,
+      temperature: 0.7
+    })
+  });
+
+  if (!resp.ok || !resp.body) {
+    botDiv.textContent = "[erro] " + resp.status;
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let full = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const j = JSON.parse(payload);
+        const delta = j.choices?.[0]?.delta?.content || "";
+        if (delta) {
+          if (firstTokenAt === null) firstTokenAt = performance.now();
+          tokens++;
+          full += delta;
+          botDiv.textContent = full;
+          chat.scrollTop = chat.scrollHeight;
+        }
+      } catch (e) {}
+    }
+  }
+
+  history.push({ role: "assistant", content: full });
+  const totalMs = performance.now() - startedAt;
+  const ttft = firstTokenAt ? (firstTokenAt - startedAt) : 0;
+  const genMs = firstTokenAt ? (performance.now() - firstTokenAt) : totalMs;
+  const tps = tokens > 1 ? (tokens / (genMs / 1000)).toFixed(2) : "—";
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `Processado por 3 nós distribuídos · ${tps} tokens/s · 1ª token em ${(ttft/1000).toFixed(1)}s`;
+  botDiv.appendChild(meta);
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  send.disabled = true;
+  try { await chatStream(text); } finally { send.disabled = false; input.focus(); }
+});
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+</script>
+</body>
+</html>

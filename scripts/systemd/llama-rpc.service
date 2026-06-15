@@ -1,0 +1,14 @@
+[Unit]
+Description=llama.cpp RPC worker (Prometeu)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/llama.cpp/build
+ExecStart=/bin/bash -c '/opt/llama.cpp/build/bin/rpc-server -H 0.0.0.0 -p 50052 >> /var/log/llama-rpc.log 2>&1'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

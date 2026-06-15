@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.gguf
+*.bin
+.env
+.env.*
+!.env.example
+config.json
+*.log
+.DS_Store
+node_modules/

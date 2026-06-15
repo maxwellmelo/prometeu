@@ -1,0 +1,23 @@
+{
+  "model_name": "Qwen 2.5 1.5B Instruct Q4_K_M",
+  "nodes": [
+    {
+      "id": "master",
+      "host": "10.0.0.100",
+      "port": 8080,
+      "role": "master + camadas 0-8"
+    },
+    {
+      "id": "worker1",
+      "host": "10.0.0.101",
+      "port": 50052,
+      "role": "RPC worker camadas 9-18"
+    },
+    {
+      "id": "worker2",
+      "host": "10.0.0.102",
+      "port": 50052,
+      "role": "RPC worker camadas 19-27"
+    }
+  ]
+}
