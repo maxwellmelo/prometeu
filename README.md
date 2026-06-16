@@ -42,6 +42,8 @@ Three things make it interesting:
 - **OpenAI-compatible API:** `https://prometeu.mx3dev.com/v1/chat/completions`
 - **Cluster status:** https://prometeu.mx3dev.com/api/nodes
 - **Mesh peers:** https://prometeu.mx3dev.com/api/mesh/peers
+- **Model catalog (allowlist):** https://prometeu.mx3dev.com/api/catalog/allowlist
+- **Pools:** https://prometeu.mx3dev.com/api/pools
 - **Prometheus metrics:** https://prometeu.mx3dev.com/metrics
 
 ### OpenAI SDK example
@@ -59,7 +61,7 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="", flush=True)
 ```
 
-Public rate limit: 30 req/min per IP on `/v1/*`.
+Public access: **reciprocity soft-quota** on `/v1/*`. Anonymous callers get a floor (~20 req/min per IP); authenticated peers that contribute capacity (signed receipts) get larger quotas. Never a hard block — over-quota returns `429` with `Retry-After`. See [Reciprocity & auth](#reciprocity--auth).
 
 ---
 
@@ -80,7 +82,7 @@ Public rate limit: 30 req/min per IP on `/v1/*`.
 |---|---|
 | `llama-server` (master) | OpenAI-compatible HTTP API, loads model header, orchestrates RPC fan-out |
 | `rpc-server` (workers) | Hosts a slice of the model's tensor graph, computes forward pass on demand |
-| FastAPI gateway | Rate limit, Prometheus metrics, token accounting, mesh discovery, registry |
+| FastAPI gateway | Model-aware routing, GGUF sizer, pool orchestration, reciprocity soft-quota, Ed25519 auth, allowlist gate, Prometheus metrics, mesh discovery, registry |
 | `prometeu-mesh` (Rust) | Iroh P2P overlay, Ed25519 identity, TCP bridge, signed CBOR receipts |
 | `prometeu-node` daemon | Per-participant dashboard `:8787`, heartbeat into public registry |
 | Cloudflare Tunnel | Public HTTPS without opening firewall ports |
@@ -132,22 +134,29 @@ sudo bash node/install.sh https://prometeu.mx3dev.com
 
 It opens a local dashboard at `http://localhost:8787`, detects your hardware (CPU, RAM, disk, GPU/VRAM when available), lets you choose the active LLM from a HuggingFace/Ollama catalog, lets you set participation limits, and heartbeats into the public registry every 15s.
 
+The installer auto-detects your CPU/GPU target (`linux-x86_64-cuda12`, `linux-aarch64`, or a Sandy-Bridge-safe x86_64 bundle), pins the correct llama.cpp binary, and provisions a **sandboxed** inference runner (dedicated user + systemd-run cgroup limits). On a pool request from the coordinator the node downloads the GGUF, **verifies its sha256 against the curated allowlist**, and only then serves it — no fallback if the hash mismatches or sandbox prerequisites are missing (blockers surface at `/api/node/preflight`).
+
 **What works today:**
 - ✅ Local dashboard with hardware fingerprint (CPU/RAM/disk + NVIDIA/AMD/DRM GPU detection)
-- ✅ Enforced CPU/RAM limits via systemd cgroups (`CPUQuota`, `MemoryMax`)
-- ✅ Model catalog selector (HuggingFace GGUF + curated Ollama) with active-model heartbeat
-- ✅ Public active-LLM stats (`/api/catalog/active`) ranked by peers and aggregate capacity
+- ✅ Enforced CPU/RAM limits via systemd cgroups (`CPUQuota`, `MemoryMax`) + sandboxed inference user
+- ✅ Multi-target llama.cpp bundles selected at install (CUDA12 / aarch64 / Sandy-Bridge-safe), built in CI
+- ✅ Model catalog selector + curated, **hash-pinned allowlist** (defense against poisoned models)
+- ✅ GGUF resource sizer — given a model, computes required peer count + per-peer RAM (`/api/pools/request` sizes automatically)
+- ✅ Pool orchestration: coordinator sizes a model, picks peers with enough RAM, instructs load, tracks WARMING→READY→DEGRADED
+- ✅ **Volunteer nodes serving public inference** via peer-direct routing (gateway routes `/v1` to the peer serving the requested model)
+- ✅ Reciprocity: signed-receipt contribution drives soft quota; Ed25519 signed-challenge auth (proof-of-key, not TOFU)
 - ✅ Heartbeat into Redis-backed public registry (`/api/registry/nodes`)
 - ✅ P2P mesh transport via Iroh (Ed25519 identity, no port-forward needed)
-- ✅ Signed CBOR receipts per session (byte-counted, server-signed)
+- ✅ Signed CBOR receipts per session (byte-counted, server-signed) aggregated into the gateway ledger
+- ✅ Pool watchdog cron (alerts on FAILED/DEGRADED/under-quorum, silent when healthy)
 
 **What does NOT work yet (roadmap):**
-- ❌ Bandwidth limit enforcement (`bandwidth_mbps` is currently declared, not shaped)
-- ❌ Partial-layer download (downloading only the layers your node will serve)
-- ❌ Resource estimator (telling you "you need N peers with X GB RAM to host model Y")
-- ❌ Volunteer nodes actually serving public inference (still routed only to fixed CT 300/301/302)
+- ❌ Bandwidth limit enforcement (`bandwidth_mbps` is declared, not shaped)
+- ❌ Partial-layer download (downloading only the layers a node will serve — still loads full GGUF per pool member)
+- ❌ Trust/reputation with slashable commitments (receipts are signed and aggregated, but not yet economically bonded)
+- ❌ mTLS between coordinator and peers (per-peer Cloudflare Tunnel auth is the current boundary)
 
-The participant daemon today **registers capacity**, **advertises active LLMs**, and **proves the mesh works**. It does not yet receive forward-pass traffic from the public gateway. That requires the coordinator layer scheduler and trust/reputation work in the roadmap below.
+The participant daemon **registers capacity**, **advertises active LLMs**, **serves public inference for allowlisted models**, and **earns reciprocity standing** through signed receipts. Larger models and partial-layer hosting remain on the roadmap below.
 
 ---
 
@@ -229,6 +238,58 @@ The reference cluster has already cut production traffic over the mesh (master `
 
 ---
 
+## Pools & model catalog
+
+A client doesn't pick a worker — it requests a **model**, and the coordinator builds a pool:
+
+```bash
+# What models am I allowed to request? (curated, hash-pinned allowlist)
+curl https://prometeu.mx3dev.com/api/catalog/allowlist
+
+# Request a model be served; coordinator sizes it, picks peers, instructs load
+curl -X POST https://prometeu.mx3dev.com/api/pools/request \
+  -H 'content-type: application/json' \
+  -d '{"model_id":"bartowski/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q4_K_M.gguf","source":"hf","context":4096}'
+
+# Watch the pool warm to quorum
+curl https://prometeu.mx3dev.com/api/pools
+```
+
+- **Allowlist gate:** only curated models with a known sha256 can be loaded. Off-list or hash-mismatch → `403`. No fallback to "just trust the download" — the primary defense against poisoned weights.
+- **Sizer:** GGUF metadata → required peer count + per-peer RAM. Importable as a lib or hit via the pool request.
+- **State machine:** `REQUESTED → WARMING → READY`, with `DEGRADED`/`FAILED`/`STOPPED`. A `*/15min` watchdog alerts on incidents and stays silent when healthy.
+
+---
+
+## Reciprocity & auth
+
+Public inference is governed by a **soft reciprocity quota**: serve to earn headroom, never hard-blocked.
+
+- **Contribution** is measured from **signed receipts** (`tokens_served`), not uptime.
+- **Consumption** is metered per `/v1` request.
+- **Standing** = contributed / consumed → maps to a requests-per-minute soft cap. Anonymous callers get the floor; contributors get more.
+
+Identity is **proof-of-key** (Ed25519), not trust-on-first-use:
+
+```bash
+# 1. get a one-time nonce for your public key
+curl -X POST https://prometeu.mx3dev.com/api/auth/challenge \
+  -H 'content-type: application/json' -d '{"public_key":"<base64-ed25519-pub>"}'
+
+# 2. sign the nonce with your private key, then exchange for a bearer token
+curl -X POST https://prometeu.mx3dev.com/api/auth/verify \
+  -H 'content-type: application/json' \
+  -d '{"public_key":"<pub>","nonce":"<nonce>","signature":"<base64-sig>"}'
+
+# 3. check your standing (send the bearer token to be recognized as a contributor)
+curl https://prometeu.mx3dev.com/api/reciprocity/standing \
+  -H 'authorization: Bearer <token>'
+```
+
+The nonce is single-use, tokens are short-lived, and a bad signature is rejected (`401`) with no fallback to trusting the claimed key.
+
+---
+
 ## Attribution requirements
 
 **Prometeu is Apache 2.0 with an enforced attribution clause.** If you use any part of Prometeu — fork, embed, fine-tune, proxy, or build on top — you MUST comply with the [NOTICE](NOTICE) file. Highlights:
@@ -262,13 +323,23 @@ Or use the SVG in [`assets/powered-by-prometeu.svg`](assets/powered-by-prometeu.
 ## Repository layout
 
 ```
-gateway/      FastAPI proxy, rate limit, metrics, registry, mesh discovery
+gateway/      FastAPI proxy: routing, sizer, pools, reciprocity, allowlist, metrics, registry, mesh
 mesh/         Rust binary (Iroh P2P transport, signed receipts)
-node/         Participant daemon + local dashboard
+node/         Participant daemon: installer, sandboxed inference runner, local dashboard
+node-agent/   Lightweight telemetry agent (heartbeat capacity into registry)
 web/          Minimal chat UI (HTML/CSS/JS, no build step)
-scripts/      install + build scripts, systemd units, proof tooling
+scripts/      install + build scripts, systemd units, watchdog, proof tooling
+tests/        pytest suite (router, sizer, pools, reciprocity, allowlist)
 assets/       branding (SVG badge)
 docs/         design notes
+```
+
+Run the test suite (42 tests):
+
+```bash
+cd prometeu && python3 -m venv .venv && . .venv/bin/activate
+pip install -r gateway/requirements.txt pytest
+pytest tests/ -q
 ```
 
 ---
@@ -290,15 +361,22 @@ docs/         design notes
 - Public active-LLM stats: dashboard ranking active models by peer count + capacity
 - Participant node GPU/VRAM detection (`nvidia-smi`, `rocm-smi`, DRM/sysfs)
 - Enforced participant CPU/RAM limits via systemd cgroups (`CPUQuota`, `MemoryMax`)
+- **Multi-target llama.cpp CI** (CUDA12 / aarch64 / Sandy-Bridge-safe x86_64 bundles)
+- **Sandboxed inference runner** on participant nodes (dedicated user + systemd-run cgroups; refuses to serve if prereqs missing)
+- **GGUF resource sizer** — model metadata → required peers + per-peer RAM (lib + `/api/pools/request`)
+- **Pool orchestration** state machine (REQUESTED→WARMING→READY, DEGRADED/FAILED/STOPPED) with multi-pool support
+- **Volunteer nodes serving public inference** via peer-direct routing
+- **Reciprocity soft-quota** driven by signed-receipt contribution
+- **Ed25519 signed-challenge auth** (proof-of-key, single-use nonce, short-lived bearer tokens)
+- **Curated hash-pinned model allowlist** (poisoned-model defense, no-fallback verification)
+- **Pool watchdog cron** (alerts on FAILED/DEGRADED/under-quorum, silent when healthy)
+- Pool + reciprocity Prometheus metrics (`prometeu_pools_total`, `prometeu_reciprocity_*`)
 
 ### 🟡 In progress / planned
-- Resource estimator (given GGUF metadata, compute required peer count + RAM/CPU)
 - Bandwidth enforcement for participant nodes (`bandwidth_mbps` traffic shaping)
-- Coordinator layer scheduler / auto-split when volunteer nodes online
-- Volunteer nodes actually serving public inference (not just registering)
 - Grafana scraping `/metrics` → public transparency dashboard
-- Optional API key auth (`PROMETEU_API_KEY`) on top of rate limit
-- Cron watchdog (alert if gateway/mesh/llama-server down)
+- mTLS between coordinator and peers (beyond per-peer Cloudflare Tunnel auth)
+- Economically-bonded / slashable receipt commitments (reputation layer)
 
 ### 🔬 Research (not committed)
 - **Partial-layer download:** today llama.cpp loads the full GGUF on the master; workers receive tensors per-request. True per-peer layer hosting requires either (a) `gguf-split`-style sharding adapted for layer boundaries with a per-shard loader in llama.cpp, or (b) a [Petals](https://github.com/bigscience-workshop/petals)-style architecture using transformers directly. Needs a spike to validate feasibility before commitment.
@@ -342,7 +420,7 @@ Três coisas interessantes:
 ```bash
 sudo bash node/install.sh https://prometeu.mx3dev.com
 ```
-Abre dashboard em `localhost:8787`. **Hoje só registra capacidade — ainda não recebe tráfego de inferência pública** (depende do scheduler do coordenador e sistema de reputação no roadmap).
+Abre dashboard em `localhost:8787`. O instalador detecta CPU/GPU, fixa o binário llama.cpp certo e provisiona um runner de inferência **sandboxed** (usuário dedicado + cgroups). Com a allowlist hash-pinned, o nó **já serve inferência pública** dos modelos curados (roteamento peer-direct) e **acumula standing de reciprocidade** via recibos assinados. Falta ainda: shaping de banda, download por camada, reputação com bond. Detalhes em [Run a participating node](#run-a-participating-node).
 
 ### Quero deployar meu próprio cluster
 Veja [Self-host the full stack](#self-host-the-full-stack) acima. Documentação técnica detalhada está em inglês.
