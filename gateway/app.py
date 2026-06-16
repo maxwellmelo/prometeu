@@ -51,6 +51,11 @@ try:
 except ImportError:  # pragma: no cover
     from gateway.router import select_peer_for_model, list_served_models, _model_matches  # type: ignore[no-redef]
 
+try:
+    from sizer import size_model  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway.sizer import size_model  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
 # The built-in master peer serves this legacy model directly via LLAMA_URL.
@@ -872,6 +877,45 @@ async def api_served():
                 "node_ids": ["master"],
             }
     return {"total_models": len(served), "models": list(served.values())}
+
+
+async def _peers_available_ram_mb() -> list[int]:
+    """Available RAM (MB) of each online peer, for pool sizing."""
+    nodes = await _list_registry_nodes()
+    out: list[int] = []
+    for n in nodes:
+        if not n.get("online"):
+            continue
+        hw = n.get("hardware") or {}
+        tel = hw.get("telemetry") or {}
+        ram = tel.get("ram_available_mb") or hw.get("ram_available_mb")
+        if ram:
+            # Respect declared limits: a peer offering 50%/2048MB shouldn't be
+            # counted for its full free RAM. Use min(free, limit) when present.
+            limit = (n.get("limits") or {}).get("ram_mb")
+            out.append(int(min(ram, limit)) if limit else int(ram))
+    return out
+
+
+@app.get("/api/catalog/size/{model_id:path}")
+async def api_catalog_size(model_id: str, source: str = "hf", context: int = 2048):
+    """Estimate RAM/peers/tok-s to run a GGUF model across the current pool.
+
+    model_id for source=hf must be 'owner/repo/filename.gguf'.
+    Includes a pool plan computed against the RAM available on online peers.
+    """
+    peers = await _peers_available_ram_mb()
+    try:
+        report = await asyncio.to_thread(
+            size_model, model_id, source, context, peers or None
+        )
+        return report
+    except NotImplementedError as e:
+        return JSONResponse({"error": "unsupported_source", "message": str(e)}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": "bad_request", "message": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": "sizing_failed", "message": str(e)}, status_code=502)
 
 
 # Frontend estático
