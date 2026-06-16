@@ -1212,8 +1212,13 @@ async def _node_inference_endpoint(node_id: str) -> str | None:
 
 
 async def _instruct_peer_load(node_id: str, pool: poolmod.Pool) -> bool:
+    # Never resolve/contact a peer unless the model artifact is fully verified.
+    # This keeps the no-unverified-download invariant local to the instruction
+    # path, not only enforced by the higher-level pool request handler.
+    if not pool.gguf_url or not pool.sha256:
+        return False
     ep = await _node_inference_endpoint(node_id)
-    if not ep or not pool.gguf_url or not pool.sha256:
+    if not ep:
         return False
     try:
         async with httpx.AsyncClient(timeout=10.0) as c:
