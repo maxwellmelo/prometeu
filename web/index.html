@@ -148,9 +148,19 @@ async function refreshPool() {
 }
 async function refreshMesh() {
   try {
-    const r = await fetch("/api/mesh/peers?capability=rpc-worker", { cache: "no-store" });
-    const d = await r.json();
-    meshEl.textContent = `mesh: ${d.total} peers Iroh`;
+    const [pr, rr] = await Promise.all([
+      fetch("/api/mesh/peers?capability=rpc-worker", { cache: "no-store" }),
+      fetch("/api/mesh/receipts?recent=0", { cache: "no-store" }),
+    ]);
+    const p = await pr.json();
+    let tokTxt = "";
+    if (rr.ok) {
+      const rec = await rr.json();
+      const tk = (rec.tokens && rec.tokens.completion) || (rec.totals && rec.totals.tokens_served) || 0;
+      const sess = (rec.totals && rec.totals.sessions) || 0;
+      tokTxt = ` · ${tk.toLocaleString("pt-BR")} tokens · ${sess.toLocaleString("pt-BR")} sessions`;
+    }
+    meshEl.textContent = `mesh: ${p.total} peers Iroh${tokTxt}`;
   } catch (e) {}
 }
 refreshNodes();

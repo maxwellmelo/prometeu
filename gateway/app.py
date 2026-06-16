@@ -464,9 +464,23 @@ async def mesh_receipts_summary(node_id: str | None = None, recent: int = 20):
                 recent_list.append(json.loads(raw))
             except Exception:
                 continue
+    # Tokens reais reportados pelo llama-server via gateway proxy hook
+    try:
+        tk = await r.mget(REDIS_TOKENS_TOTAL, REDIS_TOKENS_PROMPT, REDIS_TOKENS_COMPLETION, REDIS_TOKENS_REQUESTS)
+        tokens_block = {
+            "total": int(tk[0] or 0),
+            "prompt": int(tk[1] or 0),
+            "completion": int(tk[2] or 0),
+            "requests": int(tk[3] or 0),
+        }
+    except Exception:
+        tokens_block = {"total": 0, "prompt": 0, "completion": 0, "requests": 0}
+    grand["tokens_served"] = tokens_block["completion"] or tokens_block["total"]
+
     return {
         "schema": "prometeu/mesh/receipts/1",
         "totals": grand,
+        "tokens": tokens_block,
         "nodes": nodes,
         "recent": recent_list,
     }
@@ -493,6 +507,61 @@ async def _proxy_stream(method: str, path: str, body: bytes, headers: dict):
                 yield ("DATA", chunk)
 
 
+REDIS_TOKENS_TOTAL = "prometeu:mesh:tokens:total"
+REDIS_TOKENS_PROMPT = "prometeu:mesh:tokens:prompt"
+REDIS_TOKENS_COMPLETION = "prometeu:mesh:tokens:completion"
+REDIS_TOKENS_REQUESTS = "prometeu:mesh:tokens:requests"
+
+
+async def _credit_usage(usage: dict):
+    """Best-effort: incrementa contadores Redis com tokens reportados pelo llama-server."""
+    if not isinstance(usage, dict):
+        return
+    try:
+        total = int(usage.get("total_tokens") or 0)
+        prompt = int(usage.get("prompt_tokens") or 0)
+        completion = int(usage.get("completion_tokens") or 0)
+    except (TypeError, ValueError):
+        return
+    if total <= 0 and prompt <= 0 and completion <= 0:
+        return
+    try:
+        r = _redis()
+        pipe = r.pipeline()
+        if total > 0:
+            pipe.incrby(REDIS_TOKENS_TOTAL, total)
+        if prompt > 0:
+            pipe.incrby(REDIS_TOKENS_PROMPT, prompt)
+        if completion > 0:
+            pipe.incrby(REDIS_TOKENS_COMPLETION, completion)
+        pipe.incr(REDIS_TOKENS_REQUESTS)
+        await pipe.execute()
+    except Exception as e:
+        # Telemetria não pode quebrar o request
+        import logging
+        logging.getLogger("uvicorn.error").warning("credit_usage redis failed: %s", e)
+
+
+def _extract_usage_from_sse_chunk(buf: bytes) -> dict | None:
+    """Procura por 'usage' em data: {...} SSE. Retorna o último encontrado ou None."""
+    last = None
+    for line in buf.split(b"\n"):
+        line = line.strip()
+        if not line.startswith(b"data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == b"[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except Exception:
+            continue
+        u = obj.get("usage")
+        if isinstance(u, dict):
+            last = u
+    return last
+
+
 @app.api_route("/v1/{rest:path}", methods=["GET", "POST", "OPTIONS"])
 async def proxy_v1(rest: str, request: Request):
     body = await request.body()
@@ -506,24 +575,47 @@ async def proxy_v1(rest: str, request: Request):
     # Detecta streaming SSE
     is_stream = b'"stream":true' in body or b'"stream": true' in body
 
+    # Pra streaming, força include_usage no body se for chat/completions ou completions
+    # llama-server respeita OpenAI stream_options.include_usage; sem isso, SSE termina sem `usage`.
+    if is_stream and rest in ("chat/completions", "completions"):
+        try:
+            obj = json.loads(body)
+            so = obj.get("stream_options")
+            if not isinstance(so, dict):
+                so = {}
+            if not so.get("include_usage"):
+                so["include_usage"] = True
+                obj["stream_options"] = so
+                body = json.dumps(obj).encode()
+        except Exception:
+            pass
+
     if is_stream:
         async def gen():
+            buf = bytearray()
             agen = _proxy_stream(method, path, body, fwd_headers)
             first = await agen.__anext__()
             assert first[0] == "HEADERS"
             async for kind, *rest_ in agen:
                 if kind == "DATA":
-                    yield rest_[0]
+                    chunk = rest_[0]
+                    buf.extend(chunk)
+                    yield chunk
+            usage = _extract_usage_from_sse_chunk(bytes(buf))
+            if usage:
+                await _credit_usage(usage)
         return StreamingResponse(gen(), media_type="text/event-stream")
 
     timeout = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
     async with httpx.AsyncClient(timeout=timeout) as c:
         r = await c.request(method, f"{LLAMA_URL}{path}", content=body, headers=fwd_headers)
         is_json = r.headers.get("content-type", "").startswith("application/json")
-        return JSONResponse(
-            content=r.json() if is_json else {"raw": r.text},
-            status_code=r.status_code,
-        )
+        payload = r.json() if is_json else {"raw": r.text}
+        if is_json and isinstance(payload, dict):
+            usage = payload.get("usage")
+            if isinstance(usage, dict):
+                await _credit_usage(usage)
+        return JSONResponse(content=payload, status_code=r.status_code)
 
 
 # Frontend estático
