@@ -1,310 +1,48 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Prometeu — LLM Distribuído</title>
-<style>
-  :root {
-    --bg: #0b0d12;
-    --panel: #11141b;
-    --line: #1d2230;
-    --text: #e6e9ef;
-    --mute: #7a8294;
-    --accent: #ff8a3d;
-    --ok: #4ade80;
-    --bad: #ef4444;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column;
-  }
-  header {
-    padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .logo {
-    width: 34px; height: 34px; border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), #ff5e3a);
-    display: grid; place-items: center; font-weight: 800; color: #1a0d05;
-  }
-  h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
-  .sub { color: var(--mute); font-size: 12px; }
-  .nodes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 760px; }
-  .node {
-    padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px;
-    font-size: 11px; background: var(--panel); min-width: 170px;
-  }
-  .nodeTop { display: flex; align-items: center; gap: 7px; font-weight: 700; margin-bottom: 4px; }
-  .nodeStats { color: var(--mute); display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: 0 0 auto; }
-  .node.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .node.active { border-color: var(--accent); box-shadow: 0 0 12px rgba(255,138,61,.15); }
-  .pulse { color: var(--accent); font-weight: 800; margin-left: auto; }
-  main { flex: 1; display: flex; flex-direction: column; max-width: 920px; width: 100%; margin: 0 auto; padding: 16px; gap: 12px; }
-  #chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px 24px; }
-  .msg { padding: 12px 14px; border-radius: 12px; max-width: 88%; white-space: pre-wrap; word-wrap: break-word; }
-  .msg.user { background: #1c2230; align-self: flex-end; }
-  .msg.bot { background: var(--panel); border: 1px solid var(--line); align-self: flex-start; }
-  .msg.bot .meta { font-size: 11px; color: var(--mute); margin-top: 8px; }
-  .composer { display: flex; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: var(--panel); }
-  textarea {
-    flex: 1; border: 0; outline: 0; background: transparent; color: var(--text);
-    resize: none; font: inherit; min-height: 44px; max-height: 200px;
-  }
-  button {
-    border: 0; border-radius: 10px; padding: 0 18px; background: var(--accent); color: #1a0d05;
-    font-weight: 700; cursor: pointer; font-size: 14px;
-  }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  footer { text-align: center; color: var(--mute); font-size: 11px; padding: 12px; border-top: 1px solid var(--line); }
-  a { color: var(--accent); text-decoration: none; }
-  .empty { color: var(--mute); text-align: center; padding: 40px 16px; }
-  .badge { display: inline-block; padding: 2px 8px; background: #1c2230; border-radius: 999px; font-size: 11px; color: var(--mute); }
-</style>
-</head>
-<body>
-<header>
-  <div class="brand">
-    <div class="logo">P</div>
-    <div>
-      <h1>Prometeu</h1>
-      <div class="sub">LLM open-source rodando distribuído em hardware doméstico</div>
-    </div>
-  </div>
-  <div class="nodes" id="nodes"></div>
-</header>
-
-<section id="activeLLMs" style="max-width:980px;margin:0 auto;padding:0 14px 14px">
-  <div style="background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.25);border-radius:14px;padding:14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <strong style="font-size:13px;letter-spacing:.5px">⚡ LLMs SENDO HOSPEDADAS AGORA</strong>
-      <span id="activeCount" style="color:var(--muted);font-size:11px">—</span>
-    </div>
-    <div id="activeList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px"></div>
-    <div style="margin-top:8px;font-size:11px;color:var(--muted)">
-      Ordenado por peers (nodes que hospedam) · capacity = cores·100 + RAM/GB ·
-      <a href="/api/catalog/active" target="_blank" style="color:#a78bfa">JSON</a> ·
-      <a href="/api/catalog/llms" target="_blank" style="color:#a78bfa">catálogo top 50</a>
-    </div>
-  </div>
-</section>
-
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prometeu — Community LLM Inference</title><meta name="description" content="Community infrastructure for distributed inference of open source LLMs."><style>
+:root{--bg:#080a0f;--panel:#10141d;--panel2:#151a25;--line:#242b3a;--text:#eef2ff;--muted:#8b95aa;--accent:#ff8a3d;--purple:#a78bfa;--ok:#4ade80;--warn:#facc15;--bad:#ef4444;--blue:#60a5fa}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,rgba(167,139,250,.18),transparent 30%),radial-gradient(circle at top right,rgba(255,138,61,.16),transparent 28%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}.nav{position:sticky;top:0;z-index:10;background:rgba(8,10,15,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}.navin{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 20px}.brand{display:flex;align-items:center;gap:10px;font-weight:800}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#ff5e3a);display:grid;place-items:center;color:#190d04}.links{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:13px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 16px;background:var(--panel);color:var(--text);font-weight:700}.btn.primary{background:linear-gradient(135deg,var(--accent),#ff5e3a);border-color:transparent;color:#190d04}.btn.purple{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.35);color:#ddd6fe}.hero{padding:76px 0 44px}.eyebrow{color:var(--purple);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12px}.hero h1{font-size:clamp(40px,7vw,76px);line-height:.95;margin:14px 0 18px;letter-spacing:-.06em;max-width:940px}.lead{font-size:clamp(18px,2vw,22px);color:#c9d2e3;max-width:850px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:18px;padding:18px}.card h3{margin:0 0 8px;font-size:17px}.muted{color:var(--muted)}.section{padding:38px 0}.section h2{font-size:32px;letter-spacing:-.03em;margin:0 0 14px}.stat{font-size:34px;font-weight:900;letter-spacing:-.04em}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:12px;background:rgba(255,255,255,.03)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{overflow:auto;background:#05070b;border:1px solid var(--line);border-radius:14px;padding:14px}.cols3>.card{grid-column:span 4}.cols4>.card{grid-column:span 3}.cols2>.card{grid-column:span 6}.footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13px;margin-top:40px}.status-dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--muted);box-shadow:0 0 0 transparent}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.status-dot.ok{background:var(--ok);box-shadow:0 0 12px var(--ok)}.status-dot.warn{background:var(--warn)}.status-dot.bad{background:var(--bad)}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:10px;text-align:left}th{color:var(--muted);font-weight:700}@media(max-width:760px){.links{display:none}.cols3>.card,.cols4>.card,.cols2>.card{grid-column:1/-1}.hero{padding-top:46px}.hero h1{font-size:42px}}
+</style></head><body><div class="nav"><div class="navin wrap"><a class="brand" href="/"><span class="logo">P</span><span>Prometeu</span></a><div class="links"><a href="/dashboard.html">Dashboard</a><a href="/chat.html">Chat</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a></div></div></div>
 <main>
-  <div id="chat">
-    <div class="empty">
-      <p>👋 Olá! Sou um modelo Qwen 2.5 1.5B rodando em <strong>3 nós distribuídos</strong> via llama.cpp RPC.</p>
-      <p>Cada token desta conversa vai passar por todos os 3 computadores antes de chegar até você.</p>
-      <p>Faça uma pergunta abaixo. <span class="badge">Sem cadastro · grátis · open-source</span></p>
-    </div>
-  </div>
-  <form class="composer" id="form">
-    <textarea id="input" placeholder="Pergunte qualquer coisa…" rows="2"></textarea>
-    <button type="submit" id="send">Enviar</button>
-  </form>
-</main>
-
-<footer>
-  <a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener" style="color:#a78bfa;font-weight:600;text-decoration:none">⚡ Powered by Prometeu</a> · <span id="pool">pool público: —</span> · <span id="mesh">mesh: —</span> · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/registry/nodes" target="_blank">/api/registry/nodes</a> · <a href="/api/mesh/peers" target="_blank">/api/mesh/peers</a> · <a href="/api/health" target="_blank">/api/health</a>
-</footer>
-
-<script>
-const chat = document.getElementById("chat");
-const form = document.getElementById("form");
-const input = document.getElementById("input");
-const send = document.getElementById("send");
-const nodesEl = document.getElementById("nodes");
-const poolEl = document.getElementById("pool");
-const meshEl = document.getElementById("mesh");
-
-let history = [
-  { role: "system", content: "Você é um assistente útil rodando em um cluster distribuído de 3 computadores. Responda de forma clara e concisa em português brasileiro." }
-];
-
-function fmt(v, unit="") {
-  if (v === undefined || v === null) return "—";
-  if (typeof v === "number") return `${v.toFixed(v >= 10 ? 0 : 1)}${unit}`;
-  return `${v}${unit}`;
-}
-
-async function refreshNodes() {
-  try {
-    const r = await fetch("/api/nodes", { cache: "no-store" });
-    const d = await r.json();
-    nodesEl.innerHTML = d.nodes.map(n => {
-      const t = n.telemetry || {};
-      const active = t.active_now ? "active" : "";
-      const cpu = fmt(t.cpu_percent, "%");
-      const ram = fmt(t.ram_percent, "%");
-      const rx = fmt(t.rx_mbps, "↓");
-      const tx = fmt(t.tx_mbps, "↑");
-      const conns = t.tcp?.established ?? "—";
-      const layers = n.layers || t.layers || "—";
-      return `<div class="node ${n.alive ? "ok" : ""} ${active}" title="${n.role} · ${n.host}:${n.port}">
-        <div class="nodeTop"><span class="dot"></span><span>${n.id}</span>${t.active_now ? `<span class="pulse">WORK</span>` : ""}</div>
-        <div class="nodeStats">
-          <span>L ${layers}</span><span>TCP ${conns}</span>
-          <span>CPU ${cpu}</span><span>RAM ${ram}</span>
-          <span>${rx}</span><span>${tx}</span>
-        </div>
-      </div>`;
-    }).join("");
-  } catch (e) {}
-}
-async function refreshPool() {
-  try {
-    const r = await fetch("/api/registry/nodes", { cache: "no-store" });
-    const d = await r.json();
-    poolEl.textContent = `pool público: ${d.online}/${d.total} nodes registrados`;
-  } catch (e) {}
-}
-async function refreshMesh() {
-  try {
-    const [pr, rr] = await Promise.all([
-      fetch("/api/mesh/peers?capability=rpc-worker", { cache: "no-store" }),
-      fetch("/api/mesh/receipts?recent=0", { cache: "no-store" }),
-    ]);
-    const p = await pr.json();
-    let tokTxt = "";
-    if (rr.ok) {
-      const rec = await rr.json();
-      const tk = (rec.tokens && rec.tokens.completion) || (rec.totals && rec.totals.tokens_served) || 0;
-      const sess = (rec.totals && rec.totals.sessions) || 0;
-      tokTxt = ` · ${tk.toLocaleString("pt-BR")} tokens · ${sess.toLocaleString("pt-BR")} sessions`;
-    }
-    meshEl.textContent = `mesh: ${p.total} peers Iroh${tokTxt}`;
-  } catch (e) {}
-}
-refreshNodes();
-refreshPool();
-refreshMesh();
-refreshActiveLLMs();
-setInterval(refreshNodes, 1000);
-setInterval(refreshPool, 5000);
-setInterval(refreshMesh, 5000);
-setInterval(refreshActiveLLMs, 8000);
-
-async function refreshActiveLLMs() {
-  try {
-    const r = await fetch("/api/catalog/active", { cache: "no-store" });
-    if (!r.ok) return;
-    const d = await r.json();
-    const list = document.getElementById("activeList");
-    const count = document.getElementById("activeCount");
-    count.textContent = `${d.total_models} LLM(s) · ${d.total_peers} peer(s)`;
-    if (!d.models || d.models.length === 0) {
-      list.innerHTML = `<div style="color:var(--muted);grid-column:1/-1">Nenhum node público está hospedando uma LLM ainda. Instale um node em <a href="https://github.com/maxwellmelo/prometeu" style="color:#a78bfa">github.com/maxwellmelo/prometeu</a> e seja o primeiro.</div>`;
-      return;
-    }
-    list.innerHTML = d.models.slice(0, 12).map((m, i) => {
-      const isHF = m.source === "huggingface";
-      const url = isHF ? `https://huggingface.co/${m.model_id}` : `https://ollama.com/library/${m.model_id}`;
-      const gb = (m.ram_mb_total / 1024).toFixed(1);
-      return `<div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-          <span style="background:${isHF ? "#ff8a3d" : "#a78bfa"};color:#0b0d12;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700">${isHF ? "HF" : "OLLAMA"}</span>
-          <strong style="font-size:11px;color:var(--muted)">#${i + 1}</strong>
-        </div>
-        <a href="${url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;font-weight:700;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.model_id}">${m.model_id}</a>
-        <div style="color:var(--muted);font-size:11px;margin-top:4px">${m.peers} peer${m.peers > 1 ? "s" : ""} · ${m.cpu_cores_total} cores · ${gb}GB RAM</div>
-      </div>`;
-    }).join("");
-  } catch (e) {}
-}
-
-function addMsg(role, text) {
-  if (chat.querySelector(".empty")) chat.querySelector(".empty").remove();
-  const div = document.createElement("div");
-  div.className = "msg " + role;
-  div.textContent = text;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  return div;
-}
-
-async function chatStream(userText) {
-  history.push({ role: "user", content: userText });
-  addMsg("user", userText);
-  const botDiv = addMsg("bot", "");
-  botDiv.textContent = "…";
-
-  const startedAt = performance.now();
-  let firstTokenAt = null;
-  let tokens = 0;
-
-  const resp = await fetch("/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "qwen",
-      messages: history,
-      stream: true,
-      max_tokens: 400,
-      temperature: 0.7
-    })
-  });
-
-  if (!resp.ok || !resp.body) {
-    botDiv.textContent = "[erro] " + resp.status;
-    return;
-  }
-
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  let full = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      try {
-        const j = JSON.parse(payload);
-        const delta = j.choices?.[0]?.delta?.content || "";
-        if (delta) {
-          if (firstTokenAt === null) firstTokenAt = performance.now();
-          tokens++;
-          full += delta;
-          botDiv.textContent = full;
-          chat.scrollTop = chat.scrollHeight;
-        }
-      } catch (e) {}
-    }
-  }
-
-  history.push({ role: "assistant", content: full });
-  const totalMs = performance.now() - startedAt;
-  const ttft = firstTokenAt ? (firstTokenAt - startedAt) : 0;
-  const genMs = firstTokenAt ? (performance.now() - firstTokenAt) : totalMs;
-  const tps = tokens > 1 ? (tokens / (genMs / 1000)).toFixed(2) : "—";
-  const meta = document.createElement("div");
-  meta.className = "meta";
-  meta.textContent = `Processado por 3 nós distribuídos · ${tps} tokens/s · 1ª token em ${(ttft/1000).toFixed(1)}s`;
-  botDiv.appendChild(meta);
-}
-
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-  send.disabled = true;
-  try { await chatStream(text); } finally { send.disabled = false; input.focus(); }
-});
-
-input.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
-});
-</script>
-</body>
-</html>
+<section class="hero wrap">
+  <div class="eyebrow">Open source LLM infrastructure</div>
+  <h1>Shared inference capacity for communities.</h1>
+  <p class="lead">Prometeu turns ordinary machines into a distributed network for serving open source language models. Users can consume capacity, contributors can run nodes, and the network measures real work through signed receipts and reciprocity.</p>
+  <div class="actions"><a class="btn primary" href="/dashboard.html">View network dashboard</a><a class="btn purple" href="/node.html">Run a node</a><a class="btn" href="/chat.html">Try chat</a><a class="btn" href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a></div>
+</section>
+<section class="section wrap"><div class="grid cols4">
+  <div class="card"><div class="stat" id="statNodes">—</div><div class="muted">online nodes</div></div>
+  <div class="card"><div class="stat" id="statPools">—</div><div class="muted">model pools</div></div>
+  <div class="card"><div class="stat" id="statPeers">—</div><div class="muted">mesh peers</div></div>
+  <div class="card"><div class="stat" id="statModels">—</div><div class="muted">allowlisted models</div></div>
+</div></section>
+<section class="section wrap"><h2>What Prometeu does</h2><div class="grid cols3">
+  <div class="card"><h3>/v1 inference gateway</h3><p class="muted">Apps, CLIs, bots and UIs call a common chat/completions endpoint with streaming support.</p></div>
+  <div class="card"><h3>Model pool orchestration</h3><p class="muted">The coordinator sizes GGUF models, selects peers, warms pools and tracks READY/DEGRADED/FAILED state.</p></div>
+  <div class="card"><h3>Participant nodes</h3><p class="muted">Anyone can contribute controlled CPU/RAM/GPU capacity through a local daemon and dashboard.</p></div>
+  <div class="card"><h3>Hash-pinned allowlist</h3><p class="muted">Nodes only load curated models with known sha256 hashes. No unverified fallback.</p></div>
+  <div class="card"><h3>Reciprocity ledger</h3><p class="muted">Serving tokens earns standing. Contributors receive more usage headroom while anonymous users keep a baseline floor.</p></div>
+  <div class="card"><h3>Open observability</h3><p class="muted">Pools, peers, registry state and Prometheus metrics expose what the network is doing.</p></div>
+</div></section>
+<section class="section wrap"><h2>How it works</h2><div class="card"><pre>App/User ──POST /v1/chat/completions──▶ Gateway
+                                            │
+                                            ├─ rate limit + token metering
+                                            ├─ model/pool routing
+                                            ├─ reciprocity accounting
+                                            ▼
+                                 Pool / participant node
+                                            │
+                                            ├─ verify allowlisted model hash
+                                            ├─ run sandboxed inference
+                                            └─ emit signed receipts</pre></div></section>
+<section class="section wrap"><h2>Start building</h2><div class="grid cols2"><div class="card"><h3>Use the API</h3><pre>curl -X POST http://YOUR_COORDINATOR:3000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"qwen","messages":[{"role":"user","content":"Hello"}]}'</pre></div><div class="card"><h3>Run a node</h3><pre>curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/install.sh | sudo bash</pre><p class="muted">For guided installation, open <a href="/node.html">Run a node</a>.</p></div></div></section>
+</main><footer class="footer"><div class="wrap">⚡ Powered by <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> · Community infrastructure for open source LLM inference.</div></footer><script>
+async function j(url){try{const r=await fetch(url,{cache:'no-store'});return r.ok?await r.json():null}catch(e){return null}}
+async function refresh(){
+ const [nodes,pools,peers,allow]=await Promise.all([j('/api/registry/nodes'),j('/api/pools'),j('/api/mesh/peers'),j('/api/catalog/allowlist')]);
+ document.getElementById('statNodes').textContent=nodes?(nodes.online??(nodes.nodes||[]).filter(n=>n.online).length):'—';
+ document.getElementById('statPools').textContent=pools?(pools.total??(pools.pools||[]).length):'—';
+ document.getElementById('statPeers').textContent=peers?(peers.total??(peers.peers||[]).length):'—';
+ document.getElementById('statModels').textContent=allow?(allow.total??(allow.models||allow.allowlist||[]).length):'—';
+}refresh();setInterval(refresh,10000);
+</script></body></html>

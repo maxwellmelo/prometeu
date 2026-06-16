@@ -39,9 +39,9 @@ fi
 log "installing base packages..."
 if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq
-    apt-get install -y -qq --no-install-recommends python3-venv python3-pip curl ca-certificates
+    apt-get install -y -qq --no-install-recommends python3-venv python3-pip curl ca-certificates git
 elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q python3 python3-pip curl ca-certificates
+    dnf install -y -q python3 python3-pip curl ca-certificates git
 else
     err "unsupported distro (need apt or dnf)"; exit 1
 fi
