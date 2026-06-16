@@ -37,13 +37,13 @@
 <main>
 <section class="hero"><div class="wrap">
   <div class="eyebrow">Live network state</div>
-  <h1 style="font-size:clamp(30px,5vw,48px);margin:16px 0 12px">Prometeu dashboard</h1>
-  <p class="lead">Public view of pools, nodes, mesh peers, model catalog and reciprocity signals.</p>
+  <h1 style="font-size:clamp(30px,5vw,48px);margin:16px 0 12px">Collective capacity dashboard</h1>
+  <p class="lead">Live public registry: aggregated CPU, RAM, GPU presence, served models and pool state. Built to scale beyond the original 3-node cluster.</p>
   <div class="grid cols4 mt24">
     <div class="card stat-card"><div class="stat" id="nodesOnline">—</div><div class="lbl">online nodes</div></div>
-    <div class="card stat-card"><div class="stat" id="poolsTotal">—</div><div class="lbl">pools</div></div>
-    <div class="card stat-card"><div class="stat" id="peersTotal">—</div><div class="lbl">mesh peers</div></div>
-    <div class="card stat-card"><div class="stat" id="modelsTotal">—</div><div class="lbl">allowlisted models</div></div>
+    <div class="card stat-card"><div class="stat" id="coresTotal">—</div><div class="lbl">logical cores</div></div>
+    <div class="card stat-card"><div class="stat" id="ramTotal">—</div><div class="lbl">GB RAM online</div></div>
+    <div class="card stat-card"><div class="stat" id="modelsTotal">—</div><div class="lbl">models live</div></div>
   </div>
 </div></section>
 
@@ -154,9 +154,9 @@ const fmt=n=>n===undefined||n===null?'—':(typeof n==='number'?n.toLocaleString
 async function j(url){try{const r=await fetch(url,{cache:'no-store'});return r.ok?await r.json():null}catch(e){return null}}
 function stateClass(s){return s==='READY'?'ok':(s==='DEGRADED'||s==='WARMING'||s==='REQUESTED'?'warn':(s==='FAILED'?'bad':''));}
 async function refresh(){
- const [nodes,pools,peers,allow]=await Promise.all([j('/api/registry/nodes'),j('/api/pools'),j('/api/mesh/peers'),j('/api/catalog/allowlist')]);
- const nodeList=nodes?.nodes||[]; const poolList=pools?.pools||[]; const peerList=peers?.peers||[]; const allowModels=allow?.models||allow?.allowlist||allow?.items||[]; const totalRamMb=nodeList.filter(n=>n.online).reduce((s,n)=>s+Number(n.hardware?.ram_total_mb||0),0); renderPlanner(totalRamMb);
- nodesOnline.textContent=nodes?(nodes.online??nodeList.filter(n=>n.online).length):'—'; poolsTotal.textContent=pools?(pools.total??poolList.length):'—'; peersTotal.textContent=peers?(peers.total??peerList.length):'—'; modelsTotal.textContent=allow?(allow.total??allowModels.length):'—';
+ const [summary,nodes,pools,peers,allow]=await Promise.all([j('/api/registry/summary'),j('/api/registry/nodes?limit=50'),j('/api/pools'),j('/api/mesh/peers'),j('/api/catalog/allowlist')]);
+ const nodeList=nodes?.nodes||[]; const poolList=pools?.pools||[]; const peerList=peers?.peers||[]; const allowModels=allow?.models||allow?.allowlist||allow?.items||[]; const cap=summary?.capacity||nodes?.summary?.capacity||{}; const totalRamMb=cap.ram_total_mb||nodeList.filter(n=>n.online).reduce((s,n)=>s+Number(n.hardware?.ram_total_mb||0),0); renderPlanner(totalRamMb);
+ nodesOnline.textContent=summary?`${summary.nodes_online}/${summary.nodes_total}`:(nodes?(nodes.online??nodeList.filter(n=>n.online).length):'—'); coresTotal.textContent=fmt(cap.cores_logical); ramTotal.textContent=fmt(cap.ram_total_gb); modelsTotal.textContent=summary?fmt(summary.models_live_count):(allow?(allow.total??allowModels.length):'—');
  poolCards.innerHTML=poolList.length?poolList.map(p=>`<div class="card hover"><span class="pill"><span class="status-dot ${stateClass(p.state)}"></span>&nbsp;${esc(p.state)}</span><h3 title="${esc(p.model_id)}">${esc((p.model_id||'model').split('/').slice(-1)[0])}</h3><p class="muted">${esc(p.model_id)}</p><p class="mt8">Members: <b>${fmt((p.members||[]).length)}</b> · Ready: <b>${fmt((p.ready_members||[]).length)}</b> · Min peers: <b>${fmt(p.min_peers)}</b></p>${p.last_error?`<p class="bad">${esc(p.last_error)}</p>`:''}</div>`).join(''):'<p class="muted">No pools reported.</p>';
  const incident=poolList.find(p=>p.state==='FAILED'||p.state==='DEGRADED'||(['REQUESTED','WARMING','READY'].includes(p.state)&&((p.ready_members||[]).length<(p.min_peers||0)))); watchdog.innerHTML=incident?`<span class="bad">Incident signal:</span> ${esc(incident.state)} · ${esc(incident.model_id)}`:'<span class="ok">No active incident detected from public pool state.</span>';
  nodesTable.innerHTML=nodeList.length?nodeList.map(n=>`<tr><td data-label="Node">${esc(n.display_name||n.node_id)}</td><td data-label="Status"><span class="status-dot ${n.online?'ok':'bad'}"></span> ${esc(n.status||'—')}</td><td data-label="CPU">${fmt(n.hardware?.telemetry?.cpu_percent)}%</td><td data-label="RAM">${fmt(n.hardware?.telemetry?.ram_available_mb)} MB free</td><td data-label="Models">${esc((n.models||[]).join(', '))}</td><td data-label="Age">${fmt(Math.round(n.age_sec||0))}s</td></tr>`).join(''):'<tr><td colspan="6">No nodes reported.</td></tr>';

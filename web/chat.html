@@ -14,10 +14,10 @@ body{display:flex;flex-direction:column;height:100vh;background-attachment:initi
 .chat-head{border-bottom:1px solid var(--line);background:rgba(7,9,16,.82);backdrop-filter:blur(14px);position:sticky;top:0;z-index:30}
 .chat-head .top{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;flex-wrap:wrap}
 .head-meta .sub{color:var(--muted);font-size:12px}
-.nodes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:640px}
-.node{padding:7px 10px;border:1px solid var(--line);border-radius:10px;font-size:11px;background:var(--panel);min-width:158px}
-.nodeTop{display:flex;align-items:center;gap:7px;font-weight:700;margin-bottom:4px}
-.nodeStats{color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}
+.nodes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:720px}
+.node{padding:8px 11px;border:1px solid var(--line);border-radius:12px;font-size:11px;background:var(--panel);min-width:128px}
+.nodeTop{display:flex;align-items:center;gap:7px;font-weight:800;margin-bottom:4px}
+.nodeStats{color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
 .node.ok .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .node.active{border-color:var(--accent);box-shadow:0 0 12px rgba(255,138,61,.15)}
 .pulse{color:var(--accent);font-weight:800;margin-left:auto}
@@ -107,6 +107,7 @@ const meshEl = document.getElementById("mesh");
 let history = [
   { role: "system", content: "You are a helpful assistant served through Prometeu, an open source distributed inference network. Answer clearly and concisely." }
 ];
+let isStreaming = false;
 
 function fmt(v, unit="") {
   if (v === undefined || v === null) return "—";
@@ -116,26 +117,19 @@ function fmt(v, unit="") {
 
 async function refreshNodes() {
   try {
-    const r = await fetch("/api/nodes", { cache: "no-store" });
+    const r = await fetch("/api/registry/summary", { cache: "no-store" });
     const d = await r.json();
-    nodesEl.innerHTML = d.nodes.map(n => {
-      const t = n.telemetry || {};
-      const active = t.active_now ? "active" : "";
-      const cpu = fmt(t.cpu_percent, "%");
-      const ram = fmt(t.ram_percent, "%");
-      const rx = fmt(t.rx_mbps, "↓");
-      const tx = fmt(t.tx_mbps, "↑");
-      const conns = t.tcp?.established ?? "—";
-      const layers = n.layers || t.layers || "—";
-      return `<div class="node ${n.alive ? "ok" : ""} ${active}" title="${n.role} · ${n.host}:${n.port}">
-        <div class="nodeTop"><span class="dot"></span><span>${n.id}</span>${t.active_now ? `<span class="pulse">WORK</span>` : ""}</div>
-        <div class="nodeStats">
-          <span>L ${layers}</span><span>TCP ${conns}</span>
-          <span>CPU ${cpu}</span><span>RAM ${ram}</span>
-          <span>${rx}</span><span>${tx}</span>
-        </div>
+    const c = d.capacity || {};
+    const gpuTxt = c.vram_total_mb > 0 ? `${c.gpu_count} GPU · ${(c.vram_total_mb/1024).toFixed(1)}GB VRAM` : (c.gpu_count ? `${c.gpu_count} iGPU` : `no GPU`);
+    nodesEl.innerHTML = `
+      <div class="node ok" title="Live public registry, not legacy tensor-split cluster">
+        <div class="nodeTop"><span class="dot"></span><span>${d.nodes_online}/${d.nodes_total} online</span></div>
+        <div class="nodeStats"><span>${c.cores_logical||0} cores</span><span>${c.ram_total_gb||0}GB RAM</span></div>
+      </div>
+      <div class="node ${d.serving_now ? 'active' : ''}">
+        <div class="nodeTop"><span class="dot"></span><span>${d.serving_now||0} serving</span>${d.serving_now ? `<span class="pulse">LIVE</span>` : ""}</div>
+        <div class="nodeStats"><span>${d.models_live_count||0} model(s)</span><span>${gpuTxt}</span></div>
       </div>`;
-    }).join("");
   } catch (e) {}
 }
 async function refreshPool() {
@@ -166,10 +160,14 @@ refreshNodes();
 refreshPool();
 refreshMesh();
 refreshActiveLLMs();
-setInterval(refreshNodes, 1000);
-setInterval(refreshPool, 5000);
-setInterval(refreshMesh, 5000);
-setInterval(refreshActiveLLMs, 8000);
+function adaptivePoll(){
+  refreshNodes();
+  refreshPool();
+  refreshMesh();
+  refreshActiveLLMs();
+  setTimeout(adaptivePoll, isStreaming ? 1000 : 8000);
+}
+setTimeout(adaptivePoll, 8000);
 
 async function refreshActiveLLMs() {
   try {
@@ -210,6 +208,8 @@ function addMsg(role, text) {
 }
 
 async function chatStream(userText) {
+  isStreaming = true;
+  refreshNodes();
   history.push({ role: "user", content: userText });
   addMsg("user", userText);
   const botDiv = addMsg("bot", "");
@@ -233,6 +233,7 @@ async function chatStream(userText) {
 
   if (!resp.ok || !resp.body) {
     botDiv.textContent = "[erro] " + resp.status;
+    isStreaming = false;
     return;
   }
 
@@ -275,6 +276,8 @@ async function chatStream(userText) {
   meta.className = "meta";
   meta.textContent = `Served through Prometeu · ${tps} tokens/s · first token in ${(ttft/1000).toFixed(1)}s`;
   botDiv.appendChild(meta);
+  isStreaming = false;
+  refreshNodes();
 }
 
 form.addEventListener("submit", async (e) => {
@@ -283,7 +286,7 @@ form.addEventListener("submit", async (e) => {
   if (!text) return;
   input.value = "";
   send.disabled = true;
-  try { await chatStream(text); } finally { send.disabled = false; input.focus(); }
+  try { await chatStream(text); } finally { isStreaming = false; send.disabled = false; input.focus(); refreshNodes(); }
 });
 
 input.addEventListener("keydown", e => {

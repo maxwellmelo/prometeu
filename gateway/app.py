@@ -206,6 +206,69 @@ async def _list_registry_nodes() -> list[dict[str, Any]]:
     return nodes
 
 
+def _aggregate_nodes(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collective-capacity rollup over registry nodes.
+
+    Cheap to compute, safe on empty input, and never raises on missing fields.
+    Powers the lightweight /api/registry/summary endpoint (so clients don't
+    download full telemetry for every node just to render aggregate numbers)
+    and is embedded into /api/registry/nodes as an additive `summary` field.
+    """
+    online = [n for n in nodes if n.get("online") and n.get("status") != "offline"]
+    by_status: dict[str, int] = {}
+    cores_logical = cores_physical = ram_total_mb = ram_avail_mb = 0
+    gpu_count = vram_total_mb = 0
+    disk_free_gb = 0.0
+    serving = 0
+    models_set: set[str] = set()
+
+    for n in nodes:
+        st = str(n.get("status") or "unknown")
+        by_status[st] = by_status.get(st, 0) + 1
+        hw = n.get("hardware") or {}
+        # Only count live capacity from online nodes (offline machines aren't real capacity).
+        if n in online:
+            cores_logical += int(hw.get("cpu_count") or 0)
+            cores_physical += int(hw.get("cpu_physical") or 0)
+            ram_total_mb += int(hw.get("ram_total_mb") or 0)
+            ram_avail_mb += int(hw.get("ram_available_mb") or 0)
+            disk_free_gb += float(hw.get("disk_free_gb") or 0)
+            gpus = hw.get("gpus") or []
+            gpu_count += len(gpus)
+            for g in gpus:
+                vram_total_mb += int((g or {}).get("vram_mb") or 0)
+            inf = n.get("inference") or {}
+            if inf.get("serving"):
+                serving += 1
+            am = n.get("active_model")
+            if am:
+                models_set.add(am)
+            for m in (inf.get("models") or []):
+                # inference.models entries may be plain strings or dicts {model_id,...}
+                mid = m.get("model_id") if isinstance(m, dict) else m
+                if mid:
+                    models_set.add(mid)
+
+    return {
+        "nodes_total": len(nodes),
+        "nodes_online": len(online),
+        "by_status": by_status,
+        "serving_now": serving,
+        "models_live": sorted(models_set),
+        "models_live_count": len(models_set),
+        "capacity": {
+            "cores_logical": cores_logical,
+            "cores_physical": cores_physical,
+            "ram_total_mb": ram_total_mb,
+            "ram_available_mb": ram_avail_mb,
+            "ram_total_gb": round(ram_total_mb / 1024, 1),
+            "gpu_count": gpu_count,
+            "vram_total_mb": vram_total_mb,
+            "disk_free_gb": round(disk_free_gb, 1),
+        },
+    }
+
+
 async def _fetch_agent(host: str) -> dict[str, Any] | None:
     try:
         async with httpx.AsyncClient(timeout=1.5) as c:
@@ -485,16 +548,58 @@ async def registry_leave(payload: dict[str, Any]):
     return {"ok": True, "node_id": node_id, "backend": "redis"}
 
 
-@app.get("/api/registry/nodes")
-async def registry_nodes():
+@app.get("/api/registry/summary")
+async def registry_summary():
+    """Lightweight collective-capacity rollup — no per-node telemetry.
+
+    Built for the chat top bar and dashboard hero: clients render aggregate
+    numbers (online nodes, total cores/RAM/GPU, models live) without paying
+    to download the full node list. Scales to hundreds of nodes.
+    """
     await init_registry()
     nodes = await _list_registry_nodes()
     return {
         "backend": "redis",
-        "nodes": nodes,
-        "total": len(nodes),
-        "online": sum(1 for n in nodes if n["online"] and n["status"] != "offline"),
         "ttl_sec": REGISTRY_TTL_SEC,
+        "generated_at": time.time(),
+        **_aggregate_nodes(nodes),
+    }
+
+
+@app.get("/api/registry/nodes")
+async def registry_nodes(limit: int = 0, offset: int = 0, status: str = ""):
+    """Registry node list.
+
+    Backward compatible: called with no query params it returns the full list
+    exactly as before, plus an additive `summary` field. Optional pagination
+    (`limit`/`offset`) and `status` filter keep payloads bounded at scale.
+    """
+    await init_registry()
+    nodes = await _list_registry_nodes()
+    summary = _aggregate_nodes(nodes)
+
+    filtered = nodes
+    if status:
+        wanted = {s.strip() for s in status.split(",") if s.strip()}
+        filtered = [n for n in nodes if str(n.get("status")) in wanted]
+
+    matched = len(filtered)
+    page = filtered
+    if limit and limit > 0:
+        off = max(0, offset)
+        page = filtered[off:off + limit]
+
+    return {
+        "backend": "redis",
+        "nodes": page,
+        "total": len(nodes),
+        "matched": matched,
+        "returned": len(page),
+        "limit": limit,
+        "offset": offset,
+        "online": summary["nodes_online"],
+        "ttl_sec": REGISTRY_TTL_SEC,
+        "summary": summary,
     }
 
 
