@@ -48,6 +48,10 @@ def default_config() -> dict[str, Any]:
         "mode": "public",
         "coordinator_url": "https://prometeu.mx3dev.com",
         "models": ["qwen2.5-1.5b-q4"],
+        # active_model: the specific LLM this node is currently hosting/serving.
+        # Used by the coordinator to rank LLMs in /api/catalog/active. Should be
+        # one of the entries in `models`. Settable via /api/config or dashboard.
+        "active_model": "qwen2.5-1.5b-q4",
         "limits": {
             "cpu_percent": 50,
             "ram_mb": 1024,
@@ -119,6 +123,7 @@ def payload() -> dict[str, Any]:
         "public_key": cfg.get("public_key"),
         "mode": cfg.get("mode", "public"),
         "models": cfg.get("models", []),
+        "active_model": cfg.get("active_model") or (cfg.get("models") or [None])[0],
         "limits": cfg.get("limits", {}),
         "hardware": {**hardware(), "telemetry": telemetry()},
         "status": cfg.get("status", "available"),
@@ -169,6 +174,7 @@ class ConfigUpdate(BaseModel):
     display_name: str | None = None
     mode: str | None = None
     models: list[str] | None = None
+    active_model: str | None = None
     limits: dict[str, Any] | None = None
     schedule: dict[str, Any] | None = None
     status: str | None = None
