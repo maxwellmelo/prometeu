@@ -50,6 +50,8 @@ An open model without accessible inference capacity still leaves many people out
 
 Prometeu does not try to win by raw throughput alone. It aims to win by sovereignty, shared cost, transparency, and collective capacity.
 
+Prometeu should not be constrained to tiny models. Small models are only the bootstrap path. As community capacity grows, the network must make medium, large, and very large open models visible, measurable, and eventually runnable through dynamic pools.
+
 ---
 
 ## What Prometeu does
@@ -212,6 +214,30 @@ Main components:
 - sandbox runner with dedicated user;
 - cgroup/systemd limits;
 - preflight blockers before serving.
+
+### Model quality and quantization policy
+
+Prometeu prioritizes **Q8** quantization for runnable models because quality matters. Lower quantization can help during bootstrap, but it should not define the long-term network.
+
+Policy:
+
+- prefer `Q8_0` when the model publishes it;
+- use lower quantization only when Q8 is unavailable or explicitly approved for constrained pools;
+- show large models in the catalog even before the current network can run them;
+- expose capacity gaps so the community knows what is needed to unlock larger models.
+
+Model tiers:
+
+| Tier | Typical size | Role |
+|---|---:|---|
+| Tiny | 0.5B–3B | bootstrap, fast tests, low-resource nodes |
+| Small | 4B–8B | early community pools |
+| Medium | 12B–34B | growing network target |
+| Large | 70B+ | high-capacity community pools |
+| MoE | 8x7B+ | scheduler/research target |
+| Embed | varied | RAG/search infrastructure |
+| Vision | varied | multimodal roadmap |
+| Code | varied | developer tooling |
 
 ### Curated catalog security
 
@@ -632,7 +658,8 @@ If you change HTTP contracts, add tests. If you touch security behavior, add rej
 - mTLS between coordinator and peers.
 - Reputation with slashable commitments.
 - Better node onboarding UX.
-- Larger curated catalog.
+- Larger curated catalog with Q8-first policy and explicit lower-quantization fallback only when Q8 is unavailable.
+- Capacity planner showing which medium/large models become runnable as more peers join.
 - Peer health scoring.
 - Automatic recovery for degraded pools.
 
@@ -641,7 +668,7 @@ If you change HTTP contracts, add tests. If you touch security behavior, add rej
 - Partial layer downloads.
 - True layer-level weight sharding.
 - Heterogeneous CPU/GPU workers.
-- Larger models through dynamic pools.
+- Large and very large models through dynamic community pools.
 - Latency/region-aware scheduling.
 - Stronger remote execution verification.
 

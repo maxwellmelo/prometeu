@@ -1369,6 +1369,9 @@ async def api_catalog_allowlist():
             "display_name": m.get("display_name"),
             "params_b": m.get("params_b"),
             "ctx_max": m.get("ctx_max"),
+            "quantization": m.get("quantization"),
+            "tier": m.get("tier"),
+            "size_bytes": m.get("size_bytes"),
             "pinned": bool((m.get("sha256") or "").strip()),
         }
         for m in data.get("models", [])
