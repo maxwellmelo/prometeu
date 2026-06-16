@@ -27,7 +27,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-VERSION = "0.3.0"
+try:
+    from prometeu_node import inference
+except ImportError:  # flat layout fallback (prod deploy)
+    import inference  # type: ignore
+
+VERSION = "0.6.0"
 DEFAULT_CONFIG_PATH = Path(os.getenv("PROMETEU_NODE_CONFIG", "/etc/prometeu-node/config.json"))
 DEFAULT_WEB_DIR = Path(os.getenv("PROMETEU_NODE_WEB_DIR", "/opt/prometeu-node/web"))
 
@@ -256,7 +261,36 @@ def payload() -> dict[str, Any]:
         "status": cfg.get("status", "available"),
         "dashboard_url": cfg.get("dashboard_url"),
         "rpc_endpoint": cfg.get("rpc_endpoint"),
+        "inference": _inference_summary(),
     }
+
+
+def _inference_summary() -> dict[str, Any]:
+    """Compact view of locally-served models for the heartbeat."""
+    try:
+        loaded = inference.list_models()
+    except Exception as e:
+        return {"serving": False, "models": [], "err": str(e)}
+    served = []
+    for mid, m in loaded.items():
+        served.append({
+            "model_id": mid,
+            "port": m.get("port"),
+            "ready": m.get("ready"),
+            "endpoint": f"http://{_self_lan_ip()}:{m.get('port')}",
+        })
+    return {"serving": any(s["ready"] for s in served), "models": served}
+
+
+def _self_lan_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
 last_heartbeat: dict[str, Any] = {"ok": False, "at": 0, "err": None}
@@ -342,6 +376,66 @@ async def api_heartbeat():
     except Exception as e:
         last_heartbeat.update({"ok": False, "at": time.time(), "err": str(e)})
         return JSONResponse(last_heartbeat, status_code=502)
+
+
+class LoadRequest(BaseModel):
+    model_id: str
+    gguf_url: str
+    sha256: str
+    ctx_size: int = 2048
+    rpc_peers: list[str] | None = None
+    cpu_quota: int | None = None
+    mem_mb: int | None = None
+
+
+class UnloadRequest(BaseModel):
+    model_id: str
+
+
+@app.get("/api/node/preflight")
+def api_node_preflight():
+    return inference.sandbox_preflight()
+
+
+@app.get("/api/node/models")
+def api_node_models():
+    return {"models": inference.list_models()}
+
+
+@app.post("/api/node/load")
+def api_node_load(req: LoadRequest):
+    cfg = load_config()
+    limits = cfg.get("limits", {})
+    cpu = req.cpu_quota if req.cpu_quota is not None else limits.get("cpu_percent", 50)
+    mem = req.mem_mb if req.mem_mb is not None else limits.get("ram_mb", 1024)
+    try:
+        result = inference.load_model(
+            model_id=req.model_id,
+            gguf_url=req.gguf_url,
+            sha256=req.sha256,
+            ctx_size=req.ctx_size,
+            rpc_peers=req.rpc_peers,
+            cpu_quota=int(cpu),
+            mem_mb=int(mem),
+        )
+        # Reflect newly-served model in config so heartbeats advertise it.
+        if result.get("ok"):
+            cfg["active_model"] = req.model_id
+            models = set(cfg.get("models", []))
+            models.add(req.model_id)
+            cfg["models"] = sorted(models)
+            save_config(cfg)
+        return result
+    except Exception as e:
+        return JSONResponse({"ok": False, "err": str(e)}, status_code=500)
+
+
+@app.post("/api/node/unload")
+def api_node_unload(req: UnloadRequest):
+    try:
+        return inference.unload_model(req.model_id)
+    except Exception as e:
+        return JSONResponse({"ok": False, "err": str(e)}, status_code=500)
 
 
 if DEFAULT_WEB_DIR.is_dir():

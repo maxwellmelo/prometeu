@@ -1,0 +1,372 @@
+name: Build llama.cpp binaries
+
+# Compila llama.cpp (llama-server, rpc-server, llama-cli) para múltiplos targets
+# usados pelo Prometeu Mesh. Trigger manual (workflow_dispatch) ou push de tag
+# `llama-v*`. Saída: tar.gz por target + SHA256SUMS, anexados a uma release
+# (quando há tag) ou como artifacts (quando manual).
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_ref:
+        description: "Ref do llama.cpp (tag/branch/SHA). Padrão: b4500"
+        required: false
+        default: "b4500"
+      release_tag:
+        description: "Tag de release a criar/atualizar (vazio = só artifacts)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "llama-v*"
+
+permissions:
+  contents: write
+
+env:
+  LLAMA_REPO: "https://github.com/ggerganov/llama.cpp.git"
+  # Tag estável padrão (sobrescrita pelo input em workflow_dispatch).
+  LLAMA_REF_DEFAULT: "b4500"
+  CMAKE_COMMON_FLAGS: >-
+    -DGGML_RPC=ON
+    -DGGML_NATIVE=OFF
+    -DLLAMA_CURL=OFF
+    -DCMAKE_BUILD_TYPE=Release
+  BUILD_TARGETS: "rpc-server llama-cli llama-server"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Resolve a versão do llama.cpp a usar (input do dispatch ou default).
+  # -------------------------------------------------------------------------
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      llama_ref: ${{ steps.pick.outputs.llama_ref }}
+      release_tag: ${{ steps.pick.outputs.release_tag }}
+      is_release: ${{ steps.pick.outputs.is_release }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            REF="${GITHUB_REF#refs/tags/}"
+            echo "release_tag=${REF}" >> "$GITHUB_OUTPUT"
+            echo "llama_ref=${{ env.LLAMA_REF_DEFAULT }}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            INPUT_REF="${{ github.event.inputs.llama_ref }}"
+            INPUT_TAG="${{ github.event.inputs.release_tag }}"
+            echo "llama_ref=${INPUT_REF:-${{ env.LLAMA_REF_DEFAULT }}}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${INPUT_TAG}" >> "$GITHUB_OUTPUT"
+            if [[ -n "${INPUT_TAG}" ]]; then
+              echo "is_release=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_release=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  # -------------------------------------------------------------------------
+  # Builds Linux x86_64 (avx2, avx512, sandybridge). Roda em ubuntu-22.04
+  # nativo, sem CUDA.
+  # -------------------------------------------------------------------------
+  build-linux-x86:
+    needs: resolve
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-avx2
+            extra_cmake: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON"
+            cflags: "-march=haswell"
+          - target: linux-x86_64-avx512
+            extra_cmake: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_VNNI=ON"
+            cflags: "-march=skylake-avx512"
+          - target: linux-x86_64-sandybridge
+            extra_cmake: "-DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF"
+            cflags: "-march=sandybridge -mno-bmi -mno-bmi2 -mno-avx2 -mno-fma -mno-f16c"
+    steps:
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git ccache
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 --branch "${{ needs.resolve.outputs.llama_ref }}" \
+            "${{ env.LLAMA_REPO }}" llama.cpp || \
+          (git clone "${{ env.LLAMA_REPO }}" llama.cpp && \
+           cd llama.cpp && git checkout "${{ needs.resolve.outputs.llama_ref }}")
+
+      - name: Configure CMake
+        working-directory: llama.cpp
+        run: |
+          cmake -B build \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
+            ${{ matrix.extra_cmake }} \
+            -DCMAKE_C_FLAGS="${{ matrix.cflags }}" \
+            -DCMAKE_CXX_FLAGS="${{ matrix.cflags }}"
+
+      - name: Build
+        working-directory: llama.cpp
+        run: cmake --build build --target ${{ env.BUILD_TARGETS }} -j$(nproc)
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          LLAMA_VER="${{ needs.resolve.outputs.llama_ref }}"
+          TARGET="${{ matrix.target }}"
+          PKG="prometeu-llama-${TARGET}-${LLAMA_VER}"
+          mkdir -p "dist/${PKG}"
+          cp llama.cpp/build/bin/llama-server  "dist/${PKG}/"
+          cp llama.cpp/build/bin/rpc-server    "dist/${PKG}/"
+          cp llama.cpp/build/bin/llama-cli     "dist/${PKG}/"
+          cd dist
+          sha256sum "${PKG}"/* > "${PKG}/SHA256SUMS"
+          tar -czf "${PKG}.tar.gz" "${PKG}"
+          sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256"
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.pkg }}
+          path: |
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Build Linux x86_64 + CUDA 12. Roda em container nvidia/cuda devel.
+  # -------------------------------------------------------------------------
+  build-linux-cuda:
+    needs: resolve
+    runs-on: ubuntu-22.04
+    container:
+      image: nvidia/cuda:12.4.0-devel-ubuntu22.04
+    steps:
+      - name: Install build deps
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential cmake git ca-certificates
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 --branch "${{ needs.resolve.outputs.llama_ref }}" \
+            "${{ env.LLAMA_REPO }}" llama.cpp || \
+          (git clone "${{ env.LLAMA_REPO }}" llama.cpp && \
+           cd llama.cpp && git checkout "${{ needs.resolve.outputs.llama_ref }}")
+
+      - name: Configure CMake (CUDA)
+        working-directory: llama.cpp
+        run: |
+          cmake -B build \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
+            -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="70;75;80;86;89;90" \
+            -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON \
+            -DCMAKE_C_FLAGS="-march=haswell" \
+            -DCMAKE_CXX_FLAGS="-march=haswell"
+
+      - name: Build
+        working-directory: llama.cpp
+        run: cmake --build build --target ${{ env.BUILD_TARGETS }} -j$(nproc)
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          LLAMA_VER="${{ needs.resolve.outputs.llama_ref }}"
+          TARGET="linux-x86_64-cuda12"
+          PKG="prometeu-llama-${TARGET}-${LLAMA_VER}"
+          mkdir -p "dist/${PKG}"
+          cp llama.cpp/build/bin/llama-server  "dist/${PKG}/"
+          cp llama.cpp/build/bin/rpc-server    "dist/${PKG}/"
+          cp llama.cpp/build/bin/llama-cli     "dist/${PKG}/"
+          cd dist
+          sha256sum "${PKG}"/* > "${PKG}/SHA256SUMS"
+          tar -czf "${PKG}.tar.gz" "${PKG}"
+          sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256"
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.pkg }}
+          path: |
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Build Linux ARM64 nativo nos runners ARM64 hospedados pelo GitHub.
+  # `ubuntu-22.04-arm` é GA desde 2025 — menos frágil que QEMU/run-on-arch.
+  # -------------------------------------------------------------------------
+  build-linux-aarch64:
+    needs: resolve
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 --branch "${{ needs.resolve.outputs.llama_ref }}" \
+            "${{ env.LLAMA_REPO }}" llama.cpp || \
+          (git clone "${{ env.LLAMA_REPO }}" llama.cpp && \
+           cd llama.cpp && git checkout "${{ needs.resolve.outputs.llama_ref }}")
+
+      - name: Configure CMake
+        working-directory: llama.cpp
+        run: |
+          cmake -B build \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
+            -DGGML_CPU_ARM_ARCH=armv8-a
+
+      - name: Build
+        working-directory: llama.cpp
+        run: cmake --build build --target ${{ env.BUILD_TARGETS }} -j$(nproc)
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          LLAMA_VER="${{ needs.resolve.outputs.llama_ref }}"
+          TARGET="linux-aarch64"
+          PKG="prometeu-llama-${TARGET}-${LLAMA_VER}"
+          mkdir -p "dist/${PKG}"
+          cp llama.cpp/build/bin/llama-server  "dist/${PKG}/"
+          cp llama.cpp/build/bin/rpc-server    "dist/${PKG}/"
+          cp llama.cpp/build/bin/llama-cli     "dist/${PKG}/"
+          cd dist
+          sha256sum "${PKG}"/* > "${PKG}/SHA256SUMS"
+          tar -czf "${PKG}.tar.gz" "${PKG}"
+          sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256"
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.pkg }}
+          path: |
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Build macOS arm64 com Metal habilitado.
+  # -------------------------------------------------------------------------
+  build-macos-arm64-metal:
+    needs: resolve
+    runs-on: macos-14
+    steps:
+      - name: Install build deps
+        run: |
+          brew update
+          brew install cmake git
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 --branch "${{ needs.resolve.outputs.llama_ref }}" \
+            "${{ env.LLAMA_REPO }}" llama.cpp || \
+          (git clone "${{ env.LLAMA_REPO }}" llama.cpp && \
+           cd llama.cpp && git checkout "${{ needs.resolve.outputs.llama_ref }}")
+
+      - name: Configure CMake (Metal)
+        working-directory: llama.cpp
+        run: |
+          cmake -B build \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON
+
+      - name: Build
+        working-directory: llama.cpp
+        run: cmake --build build --target ${{ env.BUILD_TARGETS }} -j$(sysctl -n hw.ncpu)
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          LLAMA_VER="${{ needs.resolve.outputs.llama_ref }}"
+          TARGET="macos-arm64-metal"
+          PKG="prometeu-llama-${TARGET}-${LLAMA_VER}"
+          mkdir -p "dist/${PKG}"
+          cp llama.cpp/build/bin/llama-server  "dist/${PKG}/"
+          cp llama.cpp/build/bin/rpc-server    "dist/${PKG}/"
+          cp llama.cpp/build/bin/llama-cli     "dist/${PKG}/"
+          # Inclui o metallib embutido caso o build não o tenha embedded
+          if [ -f llama.cpp/build/bin/ggml-metal.metallib ]; then
+            cp llama.cpp/build/bin/ggml-metal.metallib "dist/${PKG}/"
+          fi
+          cd dist
+          shasum -a 256 "${PKG}"/* > "${PKG}/SHA256SUMS"
+          tar -czf "${PKG}.tar.gz" "${PKG}"
+          shasum -a 256 "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256"
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.pkg }}
+          path: |
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz
+            dist/${{ steps.pkg.outputs.pkg }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Publica todos os artifacts em uma release quando há tag.
+  # -------------------------------------------------------------------------
+  publish-release:
+    needs:
+      - resolve
+      - build-linux-x86
+      - build-linux-cuda
+      - build-linux-aarch64
+      - build-macos-arm64-metal
+    if: needs.resolve.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Aggregate SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          : > SHA256SUMS.txt
+          for f in *.tar.gz; do
+            sha256sum "$f" >> SHA256SUMS.txt
+          done
+          cat SHA256SUMS.txt
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.release_tag }}
+          name: "llama-cpp-${{ needs.resolve.outputs.release_tag }}"
+          body: |
+            Binários `llama.cpp` (`llama-server`, `rpc-server`, `llama-cli`) compilados
+            para os targets suportados pelo Prometeu Mesh.
+
+            Versão upstream do llama.cpp: `${{ needs.resolve.outputs.llama_ref }}`
+            Repositório upstream: https://github.com/ggerganov/llama.cpp
+
+            Verifique `SHA256SUMS.txt` antes de instalar.
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
