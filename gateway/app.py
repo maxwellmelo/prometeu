@@ -284,6 +284,85 @@ async def registry_nodes():
     }
 
 
+# --- mesh discovery (Iroh peer registry) ---
+
+REDIS_MESH_PREFIX = "prometeu:mesh:"
+REDIS_MESH_INDEX = "prometeu:mesh:index"
+MESH_TTL_SEC = int(os.getenv("PROMETEU_MESH_TTL_SEC", "120"))
+
+
+def _mesh_key(node_id: str) -> str:
+    return f"{REDIS_MESH_PREFIX}{node_id}"
+
+
+async def _list_mesh_peers(capability: str | None = None) -> list[dict[str, Any]]:
+    r = _redis()
+    ids = await r.smembers(REDIS_MESH_INDEX)
+    out: list[dict[str, Any]] = []
+    stale: list[str] = []
+    for nid in ids:
+        raw = await r.get(_mesh_key(nid))
+        if raw is None:
+            stale.append(nid)
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            stale.append(nid)
+            continue
+        if capability and data.get("capability") != capability:
+            continue
+        out.append(data)
+    if stale:
+        for nid in stale:
+            await r.srem(REDIS_MESH_INDEX, nid)
+    return out
+
+
+@app.post("/api/mesh/announce")
+async def mesh_announce(payload: dict[str, Any]):
+    node_id = str(payload.get("node_id", "")).strip()
+    if not node_id or len(node_id) != 64:
+        return JSONResponse({"ok": False, "error": "node_id must be 64-char hex"}, status_code=400)
+    capability = str(payload.get("capability", "rpc-worker")).strip() or "rpc-worker"
+    data = {
+        "node_id": node_id,
+        "capability": capability,
+        "model": str(payload.get("model", "")),
+        "layers": str(payload.get("layers", "")),
+        "region_hint": str(payload.get("region_hint", "")),
+        "display_name": str(payload.get("display_name", "")),
+        "advertised_at": int(time.time()),
+        "schema": "prometeu/advertisement/1",
+    }
+    r = _redis()
+    await r.set(_mesh_key(node_id), json.dumps(data), ex=MESH_TTL_SEC)
+    await r.sadd(REDIS_MESH_INDEX, node_id)
+    return {"ok": True, "node_id": node_id, "ttl_sec": MESH_TTL_SEC}
+
+
+@app.get("/api/mesh/peers")
+async def mesh_peers(capability: str | None = None):
+    peers = await _list_mesh_peers(capability)
+    return {
+        "schema": "prometeu/mesh/peers/1",
+        "peers": peers,
+        "total": len(peers),
+        "ttl_sec": MESH_TTL_SEC,
+    }
+
+
+@app.post("/api/mesh/leave")
+async def mesh_leave(payload: dict[str, Any]):
+    node_id = str(payload.get("node_id", "")).strip()
+    if not node_id:
+        return JSONResponse({"ok": False, "error": "node_id required"}, status_code=400)
+    r = _redis()
+    await r.delete(_mesh_key(node_id))
+    await r.srem(REDIS_MESH_INDEX, node_id)
+    return {"ok": True, "node_id": node_id}
+
+
 # Proxy genérico /v1/* pra llama-server (OpenAI-compatible)
 async def _proxy_stream(method: str, path: str, body: bytes, headers: dict):
     timeout = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)

@@ -93,7 +93,7 @@
 </main>
 
 <footer>
-  Prometeu MVP · <span id="pool">pool público: —</span> · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/registry/nodes" target="_blank">/api/registry/nodes</a> · <a href="/api/health" target="_blank">/api/health</a>
+  Prometeu MVP · <span id="pool">pool público: —</span> · <span id="mesh">mesh: —</span> · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/registry/nodes" target="_blank">/api/registry/nodes</a> · <a href="/api/mesh/peers" target="_blank">/api/mesh/peers</a> · <a href="/api/health" target="_blank">/api/health</a>
 </footer>
 
 <script>
@@ -103,6 +103,7 @@ const input = document.getElementById("input");
 const send = document.getElementById("send");
 const nodesEl = document.getElementById("nodes");
 const poolEl = document.getElementById("pool");
+const meshEl = document.getElementById("mesh");
 
 let history = [
   { role: "system", content: "Você é um assistente útil rodando em um cluster distribuído de 3 computadores. Responda de forma clara e concisa em português brasileiro." }
@@ -145,10 +146,19 @@ async function refreshPool() {
     poolEl.textContent = `pool público: ${d.online}/${d.total} nodes registrados`;
   } catch (e) {}
 }
+async function refreshMesh() {
+  try {
+    const r = await fetch("/api/mesh/peers?capability=rpc-worker", { cache: "no-store" });
+    const d = await r.json();
+    meshEl.textContent = `mesh: ${d.total} peers Iroh`;
+  } catch (e) {}
+}
 refreshNodes();
 refreshPool();
+refreshMesh();
 setInterval(refreshNodes, 1000);
 setInterval(refreshPool, 5000);
+setInterval(refreshMesh, 5000);
 
 function addMsg(role, text) {
   if (chat.querySelector(".empty")) chat.querySelector(".empty").remove();
