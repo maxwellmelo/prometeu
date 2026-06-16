@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import subprocess
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -259,7 +260,10 @@ def payload() -> dict[str, Any]:
         "limits": cfg.get("limits", {}),
         "hardware": {**hardware(), "telemetry": telemetry()},
         "status": cfg.get("status", "available"),
-        "dashboard_url": cfg.get("dashboard_url"),
+        # Advertise a control endpoint the coordinator can reach for load/unload.
+        # Falls back to this node's LAN IP on the agent port so a fresh install
+        # is reachable without manual config (no silent localhost-only bug).
+        "dashboard_url": cfg.get("dashboard_url") or f"http://{_self_lan_ip()}:{cfg.get('agent_port', 8787)}",
         "rpc_endpoint": cfg.get("rpc_endpoint"),
         "inference": _inference_summary(),
     }
@@ -408,26 +412,34 @@ def api_node_load(req: LoadRequest):
     limits = cfg.get("limits", {})
     cpu = req.cpu_quota if req.cpu_quota is not None else limits.get("cpu_percent", 50)
     mem = req.mem_mb if req.mem_mb is not None else limits.get("ram_mb", 1024)
-    try:
-        result = inference.load_model(
-            model_id=req.model_id,
-            gguf_url=req.gguf_url,
-            sha256=req.sha256,
-            ctx_size=req.ctx_size,
-            rpc_peers=req.rpc_peers,
-            cpu_quota=int(cpu),
-            mem_mb=int(mem),
-        )
-        # Reflect newly-served model in config so heartbeats advertise it.
-        if result.get("ok"):
-            cfg["active_model"] = req.model_id
-            models = set(cfg.get("models", []))
-            models.add(req.model_id)
-            cfg["models"] = sorted(models)
-            save_config(cfg)
-        return result
-    except Exception as e:
-        return JSONResponse({"ok": False, "err": str(e)}, status_code=500)
+
+    # Loading a model means downloading a (possibly large) GGUF + a cold start
+    # that can take well over a coordinator's request timeout. Run it in a
+    # background thread and return 202 immediately; the coordinator learns the
+    # node is READY from the heartbeat's inference summary, not this response.
+    def _bg_load():
+        try:
+            result = inference.load_model(
+                model_id=req.model_id,
+                gguf_url=req.gguf_url,
+                sha256=req.sha256,
+                ctx_size=req.ctx_size,
+                rpc_peers=req.rpc_peers,
+                cpu_quota=int(cpu),
+                mem_mb=int(mem),
+            )
+            if result.get("ok"):
+                c = load_config()
+                c["active_model"] = req.model_id
+                models = set(c.get("models", []))
+                models.add(req.model_id)
+                c["models"] = sorted(models)
+                save_config(c)
+        except Exception as e:  # pragma: no cover - logged via stderr
+            print(f"[prometeu-node] background load failed for {req.model_id}: {e}", flush=True)
+
+    threading.Thread(target=_bg_load, name="prometeu-load", daemon=True).start()
+    return JSONResponse({"ok": True, "status": "loading", "model_id": req.model_id}, status_code=202)
 
 
 @app.post("/api/node/unload")

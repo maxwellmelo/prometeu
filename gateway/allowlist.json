@@ -9,16 +9,28 @@
   "note": "Curated GGUF allowlist. A pool may only load a model whose (model_id, sha256) is approved here. This is the primary defense against poisoned-model attacks: a peer cannot be instructed to download arbitrary weights, and a peer that downloads a file whose sha256 does not match refuses to serve it.",
   "models": [
     {
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf",
+      "source": "hf",
+      "display_name": "Qwen 2.5 0.5B Instruct Q8_0",
+      "sha256": "ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e",
+      "params_b": 0.5,
+      "quantization": "Q8_0",
+      "ctx_max": 32768,
+      "size_bytes": 675710816,
+      "tier": "tiny",
+      "note": "Q8 verified. Smallest bootstrap model; fits low-RAM community nodes."
+    },
+    {
       "model_id": "Qwen/Qwen2.5-1.5B-Instruct-GGUF/qwen2.5-1.5b-instruct-q8_0.gguf",
       "source": "hf",
       "display_name": "Qwen 2.5 1.5B Instruct Q8_0",
-      "sha256": "",
+      "sha256": "d7efb072e7724d25048a4fda0a3e10b04bdef5d06b1403a1c93bd9f1240a63c8",
       "params_b": 1.5,
       "quantization": "Q8_0",
       "ctx_max": 32768,
       "size_bytes": 1894532128,
       "tier": "small",
-      "note": "Q8 preferred bootstrap model. sha256 must be pinned before peers serve it."
+      "note": "Q8 verified preferred bootstrap model."
     },
     {
       "model_id": "bartowski/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q8_0.gguf",
