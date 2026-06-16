@@ -130,22 +130,24 @@ Want to lend your machine to the public Prometeu pool? Install the participant d
 sudo bash node/install.sh https://prometeu.mx3dev.com
 ```
 
-It opens a local dashboard at `http://localhost:8787`, detects your hardware (CPU, RAM, bandwidth), lets you set limits (max RAM offered, max bandwidth, model whitelist), and heartbeats into the public registry every 30s.
+It opens a local dashboard at `http://localhost:8787`, detects your hardware (CPU, RAM, disk, GPU/VRAM when available), lets you choose the active LLM from a HuggingFace/Ollama catalog, lets you set participation limits, and heartbeats into the public registry every 15s.
 
 **What works today:**
-- ✅ Local dashboard with hardware fingerprint
+- ✅ Local dashboard with hardware fingerprint (CPU/RAM/disk + NVIDIA/AMD/DRM GPU detection)
+- ✅ Enforced CPU/RAM limits via systemd cgroups (`CPUQuota`, `MemoryMax`)
+- ✅ Model catalog selector (HuggingFace GGUF + curated Ollama) with active-model heartbeat
+- ✅ Public active-LLM stats (`/api/catalog/active`) ranked by peers and aggregate capacity
 - ✅ Heartbeat into Redis-backed public registry (`/api/registry/nodes`)
 - ✅ P2P mesh transport via Iroh (Ed25519 identity, no port-forward needed)
 - ✅ Signed CBOR receipts per session (byte-counted, server-signed)
 
 **What does NOT work yet (roadmap):**
-- ❌ Selecting which LLM to host from a top-50 catalog (HuggingFace + Ollama)
+- ❌ Bandwidth limit enforcement (`bandwidth_mbps` is currently declared, not shaped)
 - ❌ Partial-layer download (downloading only the layers your node will serve)
 - ❌ Resource estimator (telling you "you need N peers with X GB RAM to host model Y")
-- ❌ Public dashboard ranking active LLMs by peer count and aggregate capacity
 - ❌ Volunteer nodes actually serving public inference (still routed only to fixed CT 300/301/302)
 
-The participant daemon today **registers capacity** and **proves the mesh works**. It does not yet receive forward-pass traffic from the public gateway. That requires the coordinator layer scheduler and trust/reputation work in the roadmap below.
+The participant daemon today **registers capacity**, **advertises active LLMs**, and **proves the mesh works**. It does not yet receive forward-pass traffic from the public gateway. That requires the coordinator layer scheduler and trust/reputation work in the roadmap below.
 
 ---
 
@@ -284,11 +286,14 @@ docs/         design notes
 - Prometheus `/metrics` endpoint (path-label normalized to bound cardinality)
 - Attribution header `X-Powered-By` on every gateway response
 - Apache 2.0 license + NOTICE attribution clause
+- Top-50 LLM catalog (HuggingFace GGUF + curated Ollama) selectable from node dashboard
+- Public active-LLM stats: dashboard ranking active models by peer count + capacity
+- Participant node GPU/VRAM detection (`nvidia-smi`, `rocm-smi`, DRM/sysfs)
+- Enforced participant CPU/RAM limits via systemd cgroups (`CPUQuota`, `MemoryMax`)
 
 ### 🟡 In progress / planned
-- Top-50 LLM catalog (HuggingFace + Ollama) selectable from node dashboard
 - Resource estimator (given GGUF metadata, compute required peer count + RAM/CPU)
-- Public LLM stats: dashboard ranking active models by peer count + capacity
+- Bandwidth enforcement for participant nodes (`bandwidth_mbps` traffic shaping)
 - Coordinator layer scheduler / auto-split when volunteer nodes online
 - Volunteer nodes actually serving public inference (not just registering)
 - Grafana scraping `/metrics` → public transparency dashboard
