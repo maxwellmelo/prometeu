@@ -10,7 +10,10 @@ import asyncio
 import json
 import os
 import platform
+import re
+import shutil
 import socket
+import subprocess
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -24,7 +27,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 DEFAULT_CONFIG_PATH = Path(os.getenv("PROMETEU_NODE_CONFIG", "/etc/prometeu-node/config.json"))
 DEFAULT_WEB_DIR = Path(os.getenv("PROMETEU_NODE_WEB_DIR", "/opt/prometeu-node/web"))
 
@@ -83,6 +86,129 @@ def save_config(cfg: dict[str, Any]) -> None:
     DEFAULT_CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n")
 
 
+
+def _run(cmd: list[str], timeout: float = 2.0) -> str | None:
+    try:
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=timeout).strip()
+    except Exception:
+        return None
+
+
+def detect_gpus() -> list[dict[str, Any]]:
+    """Best-effort GPU/VRAM detection. No silent fake values.
+
+    Order:
+    1. NVIDIA via nvidia-smi (accurate VRAM, no Python deps).
+    2. AMD via rocm-smi (accurate VRAM when ROCm present).
+    3. DRM/sysfs presence scan (vendor/model only; VRAM unknown).
+    """
+    gpus: list[dict[str, Any]] = []
+
+    if shutil.which("nvidia-smi"):
+        out = _run([
+            "nvidia-smi",
+            "--query-gpu=name,memory.total,driver_version,compute_cap",
+            "--format=csv,noheader,nounits",
+        ])
+        if out:
+            for idx, line in enumerate(out.splitlines()):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 2:
+                    gpus.append({
+                        "index": idx,
+                        "vendor": "nvidia",
+                        "model": parts[0],
+                        "vram_mb": int(float(parts[1])) if parts[1].replace(".", "", 1).isdigit() else None,
+                        "driver": parts[2] if len(parts) > 2 else None,
+                        "compute_capability": parts[3] if len(parts) > 3 else None,
+                        "method": "nvidia-smi",
+                    })
+            if gpus:
+                return gpus
+
+    if shutil.which("rocm-smi"):
+        out = _run(["rocm-smi", "--showproductname", "--showmeminfo", "vram"], timeout=4.0)
+        if out:
+            cards: dict[int, dict[str, Any]] = {}
+            for line in out.splitlines():
+                m = re.search(r"GPU\[(\d+)\].*?:\s*(.*)$", line)
+                if not m:
+                    continue
+                idx = int(m.group(1)); val = m.group(2).strip()
+                card = cards.setdefault(idx, {"index": idx, "vendor": "amd", "model": None, "vram_mb": None, "method": "rocm-smi"})
+                if "Card series" in line or "Card model" in line:
+                    card["model"] = val
+                mm = re.search(r"([0-9]+)\s*(?:MiB|MB)", val)
+                if mm and ("Total" in line or "VRAM" in line):
+                    card["vram_mb"] = int(mm.group(1))
+            if cards:
+                return list(cards.values())
+
+    vendor_map = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
+    for card in sorted(Path("/sys/class/drm").glob("card[0-9]*")):
+        dev = card / "device"
+        vendor = (dev / "vendor").read_text().strip().lower() if (dev / "vendor").exists() else None
+        if not vendor:
+            continue
+        # render-only integrated GPUs are still useful to report, but VRAM is unknown.
+        model = None
+        for name_file in (dev / "product", dev / "subsystem_device"):
+            if name_file.exists():
+                try:
+                    model = name_file.read_text().strip()
+                    break
+                except Exception:
+                    pass
+        gpus.append({
+            "index": len(gpus),
+            "vendor": vendor_map.get(vendor, vendor),
+            "model": model or card.name,
+            "vram_mb": None,
+            "driver": None,
+            "compute_capability": None,
+            "method": "drm-sysfs",
+        })
+    return gpus
+
+
+
+def apply_resource_limits() -> dict[str, Any]:
+    script = shutil.which("prometeu-node-apply-limits")
+    if not script:
+        return {"ok": False, "err": "prometeu-node-apply-limits not installed; resource limits not enforced"}
+    try:
+        out = subprocess.check_output([script], text=True, stderr=subprocess.STDOUT, timeout=10)
+        return {"ok": True, "output": out.strip()}
+    except subprocess.CalledProcessError as e:
+        return {"ok": False, "err": e.output.strip() or str(e)}
+    except Exception as e:
+        return {"ok": False, "err": str(e)}
+
+def resource_limit_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = cfg or load_config()
+    limits = cfg.get("limits", {})
+    wanted_cpu = limits.get("cpu_percent")
+    wanted_ram = limits.get("ram_mb")
+    svc = os.getenv("PROMETEU_NODE_SYSTEMD_UNIT", "prometeu-node.service")
+    status = {"unit": svc, "wanted": {"cpu_percent": wanted_cpu, "ram_mb": wanted_ram}, "applied": False, "method": "systemd", "err": None}
+    if not shutil.which("systemctl"):
+        status.update({"method": None, "err": "systemctl not found; resource limits not enforced"})
+        return status
+    out = _run(["systemctl", "show", svc, "-p", "CPUQuotaPerSecUSec", "-p", "MemoryMax"], timeout=2.0)
+    if out is None:
+        status["err"] = f"cannot inspect {svc}; resource limits not enforced"
+        return status
+    props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    status["current"] = props
+    cpu_us = props.get("CPUQuotaPerSecUSec", "infinity")
+    mem = props.get("MemoryMax", "infinity")
+    cpu_ok = cpu_us != "infinity" if wanted_cpu else True
+    mem_ok = mem != "infinity" if wanted_ram else True
+    status["applied"] = bool(cpu_ok and mem_ok)
+    if not status["applied"]:
+        status["err"] = "limits configured but not enforced; run /usr/local/bin/prometeu-node-apply-limits or reinstall node"
+    return status
+
 def hardware() -> dict[str, Any]:
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
@@ -97,6 +223,7 @@ def hardware() -> dict[str, Any]:
         "ram_total_mb": round(vm.total / 1024 / 1024),
         "ram_available_mb": round(vm.available / 1024 / 1024),
         "disk_free_gb": round(disk.free / 1024 / 1024 / 1024, 1),
+        "gpus": detect_gpus(),
     }
 
 
@@ -190,6 +317,7 @@ def api_status():
         "hardware": hardware(),
         "telemetry": telemetry(),
         "heartbeat": last_heartbeat,
+        "resource_limits": resource_limit_status(cfg),
     }
 
 
@@ -201,7 +329,8 @@ def api_config(update: ConfigUpdate):
         if v is not None:
             cfg[k] = v
     save_config(cfg)
-    return {"ok": True, "config": cfg}
+    limit_apply = apply_resource_limits() if "limits" in data else None
+    return {"ok": True, "config": cfg, "limit_apply": limit_apply}
 
 
 @app.post("/api/heartbeat")

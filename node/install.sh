@@ -17,10 +17,11 @@ CONFIG_DIR="/etc/prometeu-node"
 apt-get update
 apt-get install -y --no-install-recommends python3-venv python3-pip
 
-mkdir -p "$PREFIX/prometeu_node" "$PREFIX/web" "$CONFIG_DIR"
+mkdir -p "$PREFIX/prometeu_node" "$PREFIX/web" "$PREFIX/scripts" "$CONFIG_DIR"
 install -m 0644 "$REPO_DIR/node/prometeu_node/main.py" "$PREFIX/prometeu_node/main.py"
 install -m 0644 "$REPO_DIR/node/prometeu_node/__init__.py" "$PREFIX/prometeu_node/__init__.py"
 install -m 0644 "$REPO_DIR/node/requirements.txt" "$PREFIX/requirements.txt"
+install -m 0755 "$REPO_DIR/node/scripts/prometeu-node-apply-limits" /usr/local/bin/prometeu-node-apply-limits
 cp -r "$REPO_DIR/node/web/." "$PREFIX/web/"
 
 if [[ ! -d "$PREFIX/venv" ]]; then
@@ -37,6 +38,7 @@ if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
   "mode": "public",
   "coordinator_url": "$COORDINATOR_URL",
   "models": ["qwen2.5-1.5b-q4"],
+  "active_model": "qwen2.5-1.5b-q4",
   "limits": {"cpu_percent": 50, "ram_mb": 1024, "bandwidth_mbps": 20},
   "schedule": {"enabled": false, "start": "00:00", "end": "06:00"},
   "status": "available",
@@ -50,6 +52,7 @@ fi
 install -m 0644 "$REPO_DIR/node/systemd/prometeu-node.service" /etc/systemd/system/prometeu-node.service
 systemctl daemon-reload
 systemctl enable --now prometeu-node
+/usr/local/bin/prometeu-node-apply-limits
 sleep 2
 systemctl status prometeu-node --no-pager -n 10
 

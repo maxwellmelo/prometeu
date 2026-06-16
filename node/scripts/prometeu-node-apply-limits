@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Apply Prometeu node CPU/RAM limits to systemd unit from config.json.
+
+Primary method only: systemd cgroup controls. If systemd is unavailable, fail
+loudly. No silent fallback.
+"""
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG = Path("/etc/prometeu-node/config.json")
+UNIT = "prometeu-node.service"
+
+
+def die(msg: str) -> None:
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main() -> None:
+    if not shutil.which("systemctl"):
+        die("systemctl not found; cannot enforce limits without systemd cgroups")
+    if not CONFIG.exists():
+        die(f"missing config: {CONFIG}")
+    cfg = json.loads(CONFIG.read_text())
+    limits = cfg.get("limits") or {}
+    cpu = int(limits.get("cpu_percent") or 0)
+    ram = int(limits.get("ram_mb") or 0)
+    if cpu < 1 or cpu > 100:
+        die(f"limits.cpu_percent must be 1..100, got {cpu}")
+    if ram < 128:
+        die(f"limits.ram_mb must be >=128, got {ram}")
+
+    dropin = Path(f"/etc/systemd/system/{UNIT}.d/10-resource-limits.conf")
+    dropin.parent.mkdir(parents=True, exist_ok=True)
+    dropin.write_text(
+        "[Service]\n"
+        f"CPUQuota={cpu}%\n"
+        f"MemoryMax={ram}M\n"
+        "# Written by prometeu-node-apply-limits from /etc/prometeu-node/config.json\n"
+    )
+    subprocess.check_call(["systemctl", "daemon-reload"])
+    # Apply immediately to running unit without restarting/killing the dashboard.
+    subprocess.check_call(["systemctl", "set-property", "--runtime", UNIT, f"CPUQuota={cpu}%", f"MemoryMax={ram}M"])
+    print(f"applied {UNIT}: CPUQuota={cpu}% MemoryMax={ram}M")
+
+
+if __name__ == "__main__":
+    main()
