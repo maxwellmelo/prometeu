@@ -1,0 +1,34 @@
+{
+  "schema": "prometeu/allowlist/1",
+  "updated_at": "2026-06-16",
+  "note": "Curated, hash-pinned GGUF models. A pool may only load a model whose (model_id, sha256) appears here. This is the primary defense against poisoned-model attacks: a peer cannot be instructed to download arbitrary weights, and a peer that downloads a file whose sha256 doesn't match refuses to serve it (see node/inference.py).",
+  "models": [
+    {
+      "model_id": "Qwen/Qwen2.5-1.5B-Instruct-GGUF/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "source": "hf",
+      "display_name": "Qwen 2.5 1.5B Instruct Q4_K_M",
+      "sha256": "",
+      "params_b": 1.5,
+      "ctx_max": 32768,
+      "note": "Default lightweight model. sha256 to be pinned on first verified download."
+    },
+    {
+      "model_id": "bartowski/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "source": "hf",
+      "display_name": "Llama 3.2 1B Instruct Q4_K_M",
+      "sha256": "",
+      "params_b": 1.0,
+      "ctx_max": 131072,
+      "note": "sha256 pinned on first verified download."
+    },
+    {
+      "model_id": "bartowski/Qwen2.5-3B-Instruct-GGUF/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+      "source": "hf",
+      "display_name": "Qwen 2.5 3B Instruct Q4_K_M",
+      "sha256": "",
+      "params_b": 3.0,
+      "ctx_max": 32768,
+      "note": "sha256 pinned on first verified download."
+    }
+  ]
+}

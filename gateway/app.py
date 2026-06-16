@@ -66,6 +66,11 @@ try:
 except ImportError:  # pragma: no cover
     from gateway import reciprocity as recip  # type: ignore[no-redef]
 
+try:
+    import allowlist as allowmod  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway import allowlist as allowmod  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
 # The built-in master peer serves this legacy model directly via LLAMA_URL.
@@ -341,6 +346,47 @@ METRIC_ACTIVE_LLMS = Gauge(
     "prometeu_active_llms_total",
     "Distinct LLMs being hosted by at least one online registered node",
 )
+METRIC_POOLS = Gauge(
+    "prometeu_pools_total",
+    "Pools by state",
+    ["state"],
+)
+METRIC_RECIPROCITY_SOFT_QUOTA = Counter(
+    "prometeu_reciprocity_soft_quota_total",
+    "Requests over reciprocity soft quota",
+    ["authenticated"],
+)
+METRIC_CONSUMED_TOKENS = Counter(
+    "prometeu_reciprocity_consumed_tokens_total",
+    "Tokens consumed through gateway /v1 by auth class",
+    ["authenticated"],
+)
+
+
+def _update_pool_metrics(pools: list[Any]) -> None:
+    try:
+        states = ["REQUESTED", "WARMING", "READY", "DEGRADED", "FAILED", "STOPPED"]
+        counts = {s: 0 for s in states}
+        for p in pools:
+            st = p.state if hasattr(p, "state") else str((p or {}).get("state"))
+            counts[st] = counts.get(st, 0) + 1
+        for st, n in counts.items():
+            METRIC_POOLS.labels(st).set(n)
+    except Exception:
+        pass
+
+
+def _metric_auth_label(authenticated: bool) -> str:
+    return "true" if authenticated else "false"
+
+
+async def _bump_consumption_metrics(authenticated: bool, tokens: int) -> None:
+    try:
+        if tokens > 0:
+            METRIC_CONSUMED_TOKENS.labels(_metric_auth_label(authenticated)).inc(tokens)
+    except Exception:
+        pass
+
 
 
 @app.middleware("http")
@@ -808,6 +854,10 @@ async def proxy_v1(rest: str, request: Request):
     used = await _minute_usage(identity)
     quota = recip.quota_decision(authenticated, contributed, consumed, used)
     if not quota["allow"]:
+        try:
+            METRIC_RECIPROCITY_SOFT_QUOTA.labels(_metric_auth_label(authenticated)).inc()
+        except Exception:
+            pass
         return JSONResponse(
             {"error": "soft_quota", "message": "reciprocity soft quota exceeded; contribute capacity or slow down", **quota},
             status_code=429,
@@ -869,7 +919,9 @@ async def proxy_v1(rest: str, request: Request):
             if usage:
                 await _credit_usage(usage)
                 try:
-                    await _bump_consumed(identity, int(usage.get("total_tokens") or 0))
+                    _t = int(usage.get("total_tokens") or 0)
+                    await _bump_consumed(identity, _t)
+                    await _bump_consumption_metrics(authenticated, _t)
                 except Exception:
                     pass
         return StreamingResponse(gen(), media_type="text/event-stream", headers=served_by_headers)
@@ -884,7 +936,9 @@ async def proxy_v1(rest: str, request: Request):
             if isinstance(usage, dict):
                 await _credit_usage(usage)
                 try:
-                    await _bump_consumed(identity, int(usage.get("total_tokens") or 0))
+                    _t = int(usage.get("total_tokens") or 0)
+                    await _bump_consumed(identity, _t)
+                    await _bump_consumption_metrics(authenticated, _t)
                 except Exception:
                     pass
         return JSONResponse(content=payload, status_code=r.status_code, headers=served_by_headers)
@@ -1074,6 +1128,17 @@ class PoolRequest(BaseModel):
 async def api_pool_request(req: PoolRequest):
     """Request that a model be served by a pool. Sizes the model, picks peers
     with enough RAM, instructs them to load, and tracks warming to quorum."""
+    # 0. Allowlist gate (Fase 6 hardening). Only curated, hash-pinned models may
+    # be loaded — primary defense against poisoned-model attacks. No fallback:
+    # off-list or sha-mismatch is a hard 403.
+    gate = allowmod.check_model(req.model_id, req.source, req.sha256)
+    if not gate["allowed"]:
+        return JSONResponse(
+            {"error": "model_not_allowed", "message": gate["reason"], "model": req.model_id},
+            status_code=403,
+        )
+    effective_sha = gate["sha256"]
+
     # 1. Size the model against current peer RAM to get min_peers + per-peer RAM.
     peers_ram = await _peers_available_ram_mb()
     try:
@@ -1095,7 +1160,7 @@ async def api_pool_request(req: PoolRequest):
     pool = poolmod.Pool(
         pool_id=pool_id, model_id=req.model_id, source=req.source,
         context=req.context, min_peers=min_peers,
-        gguf_url=report.get("url"), sha256=req.sha256,
+        gguf_url=report.get("url"), sha256=effective_sha,
         ram_per_peer_mb=ram_per_peer, state=poolmod.REQUESTED,
     )
 
@@ -1132,6 +1197,7 @@ async def api_pools_list():
         poolmod.reconcile(p, ready)
         await _save_pool(p)
         out.append(p.to_dict())
+    _update_pool_metrics(pools)
     return {"total": len(out), "pools": out}
 
 
@@ -1285,6 +1351,31 @@ async def api_reciprocity_standing(request: Request):
                      "contributed_tokens": contributed,
                      "consumed_tokens": consumed})
     return decision
+
+
+@app.get("/api/catalog/allowlist")
+async def api_catalog_allowlist():
+    """Curated models a client may request via /api/pools/request.
+
+    Public discovery endpoint. Exposes model_id, display name, size, ctx and
+    whether the sha256 is pinned (verified) — but lets the operator keep the
+    file as the single source of truth.
+    """
+    data = allowmod.load_allowlist()
+    models = [
+        {
+            "model_id": m.get("model_id"),
+            "source": m.get("source", "hf"),
+            "display_name": m.get("display_name"),
+            "params_b": m.get("params_b"),
+            "ctx_max": m.get("ctx_max"),
+            "pinned": bool((m.get("sha256") or "").strip()),
+        }
+        for m in data.get("models", [])
+    ]
+    return {"schema": data.get("schema", "prometeu/allowlist/1"),
+            "updated_at": data.get("updated_at"),
+            "models": models, "total": len(models)}
 
 
 # Frontend estático
