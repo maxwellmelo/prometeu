@@ -30,10 +30,14 @@ from typing import Any
 
 import httpx
 import redis.asyncio as redis
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
@@ -202,6 +206,20 @@ async def refresh_nodes() -> list[dict]:
         })
     node_status_cache["nodes"] = out
     node_status_cache["checked_at"] = time.time()
+    # Gauges Prometheus (best-effort)
+    try:
+        alive = sum(1 for n in out if n.get("alive"))
+        METRIC_NODES_ALIVE.set(alive)
+        METRIC_NODES_TOTAL.set(len(out))
+        # Mesh peers: conta entries no índice Redis (TTL-based)
+        try:
+            r = _redis()
+            mesh_count = await r.scard("prometeu:mesh:index")
+            METRIC_MESH_PEERS.set(int(mesh_count or 0))
+        except Exception:
+            pass
+    except Exception:
+        pass
     return out
 
 
@@ -224,6 +242,91 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Prometeu Gateway", lifespan=lifespan)
+
+# ─── Rate limiting (slowapi) ─────────────────────────────────────────
+RATE_LIMIT_V1 = os.getenv("PROMETEU_RATE_LIMIT_V1", "30/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    METRIC_RATE_LIMITED.labels(path=request.url.path).inc()
+    return JSONResponse(
+        status_code=429,
+        content={"error": "rate_limit_exceeded", "detail": str(exc.detail)},
+        headers={"Retry-After": "60"},
+    )
+
+
+# ─── Prometheus metrics ──────────────────────────────────────────────
+METRIC_REQUESTS = Counter(
+    "prometeu_requests_total",
+    "HTTP requests processed",
+    ["path", "method", "status"],
+)
+METRIC_LATENCY = Histogram(
+    "prometeu_request_latency_seconds",
+    "Request latency in seconds",
+    ["path"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+METRIC_TOKENS = Counter(
+    "prometeu_tokens_total",
+    "Tokens served (reported by llama-server)",
+    ["kind"],  # prompt | completion | total
+)
+METRIC_INFERENCE_REQUESTS = Counter(
+    "prometeu_inference_requests_total",
+    "Inference requests credited by usage",
+)
+METRIC_RATE_LIMITED = Counter(
+    "prometeu_rate_limited_total",
+    "Requests rejected by rate limiter",
+    ["path"],
+)
+METRIC_NODES_ALIVE = Gauge(
+    "prometeu_nodes_alive",
+    "Cluster nodes alive (master + workers)",
+)
+METRIC_NODES_TOTAL = Gauge(
+    "prometeu_nodes_total",
+    "Cluster nodes total (configured)",
+)
+METRIC_MESH_PEERS = Gauge(
+    "prometeu_mesh_peers_online",
+    "Mesh peers online in registry (Redis TTL)",
+)
+
+
+@app.middleware("http")
+async def _metrics_mw(request: Request, call_next):
+    # Normaliza path pra evitar high-cardinality (ex: /v1/chat/completions vs /v1/foo)
+    raw = request.url.path
+    if raw.startswith("/v1/"):
+        path_label = "/v1/" + raw.split("/", 2)[2].split("?")[0]
+    elif raw.startswith("/api/"):
+        path_label = raw.split("?")[0]
+    elif raw == "/metrics":
+        path_label = "/metrics"
+    else:
+        path_label = "static"
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except Exception:
+        METRIC_REQUESTS.labels(path=path_label, method=request.method, status="500").inc()
+        METRIC_LATENCY.labels(path=path_label).observe(time.perf_counter() - start)
+        raise
+    METRIC_REQUESTS.labels(path=path_label, method=request.method, status=str(status)).inc()
+    METRIC_LATENCY.labels(path=path_label).observe(time.perf_counter() - start)
+    return response
+
+
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/api/nodes")
@@ -525,6 +628,17 @@ async def _credit_usage(usage: dict):
         return
     if total <= 0 and prompt <= 0 and completion <= 0:
         return
+    # Prometheus counters (process-local, sobrevive reload do gateway)
+    try:
+        if prompt > 0:
+            METRIC_TOKENS.labels(kind="prompt").inc(prompt)
+        if completion > 0:
+            METRIC_TOKENS.labels(kind="completion").inc(completion)
+        if total > 0:
+            METRIC_TOKENS.labels(kind="total").inc(total)
+        METRIC_INFERENCE_REQUESTS.inc()
+    except Exception:
+        pass
     try:
         r = _redis()
         pipe = r.pipeline()
@@ -563,6 +677,7 @@ def _extract_usage_from_sse_chunk(buf: bytes) -> dict | None:
 
 
 @app.api_route("/v1/{rest:path}", methods=["GET", "POST", "OPTIONS"])
+@limiter.limit(RATE_LIMIT_V1)
 async def proxy_v1(rest: str, request: Request):
     body = await request.body()
     fwd_headers = {
