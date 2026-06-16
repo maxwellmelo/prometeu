@@ -157,9 +157,9 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 7. llama binaries (non-fatal if download fails — node still registers)
+# 7. llama binaries (hard requirement for serving; no fallback)
 # ---------------------------------------------------------------------------
-install_llama_binaries || err "continuing without llama binaries; node will register but cannot serve inference until binaries are installed"
+install_llama_binaries
 
 # ---------------------------------------------------------------------------
 # 8. systemd unit
@@ -167,7 +167,7 @@ install_llama_binaries || err "continuing without llama binaries; node will regi
 install -m 0644 "$REPO_DIR/node/systemd/prometeu-node.service" /etc/systemd/system/prometeu-node.service
 systemctl daemon-reload
 systemctl enable --now prometeu-node
-/usr/local/bin/prometeu-node-apply-limits || true
+/usr/local/bin/prometeu-node-apply-limits
 sleep 2
 systemctl status prometeu-node --no-pager -n 10 || true
 
@@ -177,5 +177,14 @@ echo "Dashboard:  http://localhost:8787"
 echo "Config:     $CONFIG_DIR/config.json"
 echo "Models dir: $MODELS_DIR"
 echo
-log "Preflight check:"
+log "Preflight check (must be true before serving):"
 curl -fsS http://localhost:8787/api/node/preflight 2>/dev/null | python3 -m json.tool || echo "(daemon still starting; check 'curl localhost:8787/api/node/preflight' in a few seconds)"
+log "Resource limit check (resource_limits.applied must be true):"
+curl -fsS http://localhost:8787/api/status 2>/dev/null | python3 - <<'PY' || echo "(daemon still starting; check 'curl localhost:8787/api/status' in a few seconds)"
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    print(json.dumps({"resource_limits.applied": data.get("resource_limits", {}).get("applied")}, indent=2))
+except Exception as e:
+    raise SystemExit(str(e))
+PY

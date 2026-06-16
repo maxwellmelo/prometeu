@@ -25,7 +25,9 @@ The installer:
   and downloads the matching prebuilt `llama-server` + `rpc-server` from GitHub Releases;
 - creates a locked-down system user `prometeu-inf` (no shell, no home);
 - creates `/var/lib/prometeu-node/models` owned by that user;
-- installs and starts the `prometeu-node` systemd service.
+- installs and starts the `prometeu-node` systemd service;
+- exits non-zero if the matching llama.cpp binary bundle cannot be installed;
+- exits non-zero if resource-limit setup fails.
 
 ## Sandbox model (no fallbacks)
 
