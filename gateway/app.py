@@ -61,6 +61,11 @@ try:
 except ImportError:  # pragma: no cover
     from gateway import pools as poolmod  # type: ignore[no-redef]
 
+try:
+    import reciprocity as recip  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway import reciprocity as recip  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
 # The built-in master peer serves this legacy model directly via LLAMA_URL.
@@ -793,6 +798,22 @@ async def proxy_v1(rest: str, request: Request):
     method = request.method
     path = f"/v1/{rest}"
 
+    # Soft reciprocity quota. Authenticated contributors get larger RPM based
+    # on signed-receipt contribution; anonymous callers get the floor. This is
+    # "soft" in policy terms: 429 asks caller to slow down, never swaps model or
+    # hides the reason.
+    identity, authenticated, pubkey = await _resolve_identity(request)
+    contributed = await _contributed_tokens(pubkey) if pubkey else 0
+    consumed = await _consumed_tokens(identity)
+    used = await _minute_usage(identity)
+    quota = recip.quota_decision(authenticated, contributed, consumed, used)
+    if not quota["allow"]:
+        return JSONResponse(
+            {"error": "soft_quota", "message": "reciprocity soft quota exceeded; contribute capacity or slow down", **quota},
+            status_code=429,
+            headers={"Retry-After": str(quota["retry_after_sec"]), "X-Prometeu-Standing": str(quota["standing"])},
+        )
+
     # Route by requested model. No model -> master. Named model with no serving
     # peer -> explicit 503 (no silent fallback to whatever is loaded).
     requested_model = _extract_model_from_body(body)
@@ -847,6 +868,10 @@ async def proxy_v1(rest: str, request: Request):
             usage = _extract_usage_from_sse_chunk(bytes(buf))
             if usage:
                 await _credit_usage(usage)
+                try:
+                    await _bump_consumed(identity, int(usage.get("total_tokens") or 0))
+                except Exception:
+                    pass
         return StreamingResponse(gen(), media_type="text/event-stream", headers=served_by_headers)
 
     timeout = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
@@ -858,6 +883,10 @@ async def proxy_v1(rest: str, request: Request):
             usage = payload.get("usage")
             if isinstance(usage, dict):
                 await _credit_usage(usage)
+                try:
+                    await _bump_consumed(identity, int(usage.get("total_tokens") or 0))
+                except Exception:
+                    pass
         return JSONResponse(content=payload, status_code=r.status_code, headers=served_by_headers)
 
 
@@ -1130,6 +1159,132 @@ async def api_pool_stop(pool_id: str):
     poolmod.reconcile(p, ready)
     await _save_pool(p)
     return p.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Reciprocity & signed-challenge auth (Fase 5)
+# ---------------------------------------------------------------------------
+REDIS_CHALLENGE_PREFIX = "prometeu:auth:challenge:"
+REDIS_TOKEN_PREFIX = "prometeu:auth:token:"
+REDIS_CONSUMED_PREFIX = "prometeu:recip:consumed:"   # per-pubkey consumed tokens
+REDIS_RPM_PREFIX = "prometeu:recip:rpm:"             # per-identity minute bucket
+
+
+async def _contributed_tokens(node_pubkey: str) -> int:
+    """Tokens this identity has served, summed from the signed-receipt ledger.
+
+    Receipts are keyed by node_id; we map pubkey->node_id via the registry.
+    """
+    r = _redis()
+    nodes = await _list_registry_nodes()
+    total = 0
+    for n in nodes:
+        if n.get("public_key") == node_pubkey:
+            raw = await r.hget(_receipts_key(n["node_id"]), "tokens_served")
+            if raw:
+                try:
+                    total += int(raw)
+                except (TypeError, ValueError):
+                    pass
+    return total
+
+
+async def _consumed_tokens(identity: str) -> int:
+    r = _redis()
+    raw = await r.get(f"{REDIS_CONSUMED_PREFIX}{identity}")
+    try:
+        return int(raw) if raw else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _bump_consumed(identity: str, tokens: int) -> None:
+    if tokens <= 0:
+        return
+    r = _redis()
+    await r.incrby(f"{REDIS_CONSUMED_PREFIX}{identity}", tokens)
+
+
+async def _minute_usage(identity: str) -> int:
+    r = _redis()
+    bucket = int(time.time() // 60)
+    key = f"{REDIS_RPM_PREFIX}{identity}:{bucket}"
+    n = await r.incr(key)
+    if n == 1:
+        await r.expire(key, 120)
+    return int(n)
+
+
+async def _resolve_identity(request: Request) -> tuple[str, bool, str | None]:
+    """Returns (identity, authenticated, public_key).
+
+    Bearer token (from /api/auth/verify) -> authenticated identity = pubkey.
+    Otherwise anonymous, identity = client IP.
+    """
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        r = _redis()
+        pk = await r.get(f"{REDIS_TOKEN_PREFIX}{token}")
+        if pk:
+            pk = pk.decode() if isinstance(pk, bytes) else pk
+            return (pk, True, pk)
+    return (get_remote_address(request), False, None)
+
+
+class ChallengeRequest(BaseModel):
+    public_key: str
+
+
+class VerifyRequest(BaseModel):
+    public_key: str
+    nonce: str
+    signature: str
+
+
+@app.post("/api/auth/challenge")
+async def api_auth_challenge(req: ChallengeRequest):
+    """Issue a one-time nonce the caller must sign with its Ed25519 key."""
+    nonce = recip.make_nonce()
+    r = _redis()
+    await r.set(f"{REDIS_CHALLENGE_PREFIX}{req.public_key}", nonce, ex=recip.CHALLENGE_TTL_SEC)
+    return {"nonce": nonce, "ttl_sec": recip.CHALLENGE_TTL_SEC}
+
+
+@app.post("/api/auth/verify")
+async def api_auth_verify(req: VerifyRequest):
+    """Verify the signed nonce; on success issue a short-lived bearer token."""
+    r = _redis()
+    stored = await r.get(f"{REDIS_CHALLENGE_PREFIX}{req.public_key}")
+    if not stored:
+        return JSONResponse({"error": "no_challenge", "message": "request a challenge first"}, status_code=400)
+    stored = stored.decode() if isinstance(stored, bytes) else stored
+    if stored != req.nonce:
+        return JSONResponse({"error": "nonce_mismatch"}, status_code=400)
+    try:
+        ok = recip.verify_signature(req.public_key, req.nonce, req.signature)
+    except RuntimeError as e:
+        return JSONResponse({"error": "auth_unavailable", "message": str(e)}, status_code=503)
+    if not ok:
+        return JSONResponse({"error": "bad_signature"}, status_code=401)
+    # Single-use: delete the challenge.
+    await r.delete(f"{REDIS_CHALLENGE_PREFIX}{req.public_key}")
+    token = recip.make_token()
+    await r.set(f"{REDIS_TOKEN_PREFIX}{token}", req.public_key, ex=recip.TOKEN_TTL_SEC)
+    return {"token": token, "token_type": "bearer", "expires_in": recip.TOKEN_TTL_SEC}
+
+
+@app.get("/api/reciprocity/standing")
+async def api_reciprocity_standing(request: Request):
+    identity, authed, pk = await _resolve_identity(request)
+    contributed = await _contributed_tokens(pk) if pk else 0
+    consumed = await _consumed_tokens(identity)
+    used = 0  # don't consume a minute slot just for a status check
+    decision = recip.quota_decision(authed, contributed, consumed, used)
+    decision.update({"identity": identity if authed else "anonymous",
+                     "contributed_tokens": contributed,
+                     "consumed_tokens": consumed})
+    return decision
 
 
 # Frontend estático
