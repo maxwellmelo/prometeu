@@ -46,8 +46,18 @@ try:
 except ImportError:  # pragma: no cover
     from gateway.catalog import aggregate_active_llms, fetch_catalog  # type: ignore[no-redef]
 
+try:
+    from router import select_peer_for_model, list_served_models, _model_matches  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway.router import select_peer_for_model, list_served_models, _model_matches  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
+# The built-in master peer serves this legacy model directly via LLAMA_URL.
+# Requests for it (or with no model specified) route to the master; everything
+# else routes to a registry peer that advertises it. No silent fallback: if a
+# named model has no serving peer, proxy_v1 returns 503.
+MASTER_MODEL = os.getenv("PROMETEU_MASTER_MODEL", "qwen2.5-1.5b-q4")
 
 
 def _find_config() -> Path:
@@ -650,13 +660,46 @@ async def mesh_leave(payload: dict[str, Any]):
 
 
 # Proxy genérico /v1/* pra llama-server (OpenAI-compatible)
-async def _proxy_stream(method: str, path: str, body: bytes, headers: dict):
+async def _proxy_stream(method: str, path: str, body: bytes, headers: dict, base_url: str):
     timeout = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(method, f"{LLAMA_URL}{path}", content=body, headers=headers) as r:
+        async with client.stream(method, f"{base_url}{path}", content=body, headers=headers) as r:
             yield ("HEADERS", r.status_code, dict(r.headers))
             async for chunk in r.aiter_bytes():
                 yield ("DATA", chunk)
+
+
+def _extract_model_from_body(body: bytes) -> str | None:
+    if not body:
+        return None
+    try:
+        obj = json.loads(body)
+        m = obj.get("model")
+        return m if isinstance(m, str) and m else None
+    except Exception:
+        return None
+
+
+async def _resolve_target(requested_model: str | None) -> dict[str, Any]:
+    """Decide where a /v1 request goes.
+
+    Returns {"base_url", "served_by", "node_id"} or raises a 503-worthy
+    LookupError if a named model has no serving peer.
+    """
+    # No model or the master's own model -> built-in master peer.
+    if not requested_model or requested_model in (MASTER_MODEL, "qwen", "default"):
+        return {"base_url": LLAMA_URL, "served_by": "master", "node_id": "master"}
+
+    nodes = await _list_registry_nodes()
+    peer = select_peer_for_model(requested_model, nodes)
+    if peer:
+        return {"base_url": peer["endpoint"], "served_by": peer["display_name"], "node_id": peer["node_id"]}
+
+    # The master also serves MASTER_MODEL under loose matching.
+    if _model_matches(requested_model, MASTER_MODEL):
+        return {"base_url": LLAMA_URL, "served_by": "master", "node_id": "master"}
+
+    raise LookupError(requested_model)
 
 
 REDIS_TOKENS_TOTAL = "prometeu:mesh:tokens:total"
@@ -736,6 +779,28 @@ async def proxy_v1(rest: str, request: Request):
     method = request.method
     path = f"/v1/{rest}"
 
+    # Route by requested model. No model -> master. Named model with no serving
+    # peer -> explicit 503 (no silent fallback to whatever is loaded).
+    requested_model = _extract_model_from_body(body)
+    try:
+        target = await _resolve_target(requested_model)
+    except LookupError:
+        return JSONResponse(
+            {
+                "error": "model_not_served",
+                "message": f"No online peer is serving '{requested_model}'. "
+                           f"Request a pool start via POST /api/pools/request, "
+                           f"then contribute capacity by joining the pool.",
+                "model": requested_model,
+            },
+            status_code=503,
+        )
+    base_url = target["base_url"]
+    served_by_headers = {
+        "X-Prometeu-Served-By": str(target["served_by"]),
+        "X-Prometeu-Node-Id": str(target["node_id"]),
+    }
+
     # Detecta streaming SSE
     is_stream = b'"stream":true' in body or b'"stream": true' in body
 
@@ -757,7 +822,7 @@ async def proxy_v1(rest: str, request: Request):
     if is_stream:
         async def gen():
             buf = bytearray()
-            agen = _proxy_stream(method, path, body, fwd_headers)
+            agen = _proxy_stream(method, path, body, fwd_headers, base_url)
             first = await agen.__anext__()
             assert first[0] == "HEADERS"
             async for kind, *rest_ in agen:
@@ -768,18 +833,45 @@ async def proxy_v1(rest: str, request: Request):
             usage = _extract_usage_from_sse_chunk(bytes(buf))
             if usage:
                 await _credit_usage(usage)
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(gen(), media_type="text/event-stream", headers=served_by_headers)
 
     timeout = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
     async with httpx.AsyncClient(timeout=timeout) as c:
-        r = await c.request(method, f"{LLAMA_URL}{path}", content=body, headers=fwd_headers)
+        r = await c.request(method, f"{base_url}{path}", content=body, headers=fwd_headers)
         is_json = r.headers.get("content-type", "").startswith("application/json")
         payload = r.json() if is_json else {"raw": r.text}
         if is_json and isinstance(payload, dict):
             usage = payload.get("usage")
             if isinstance(usage, dict):
                 await _credit_usage(usage)
-        return JSONResponse(content=payload, status_code=r.status_code)
+        return JSONResponse(content=payload, status_code=r.status_code, headers=served_by_headers)
+
+
+@app.get("/api/served")
+async def api_served():
+    """Which models are actually being served right now, by ready-peer count.
+
+    The master's built-in model is always listed (LLAMA_URL is a peer)."""
+    nodes = await _list_registry_nodes()
+    served = list_served_models(nodes)
+    # Ensure the master model is represented even if the master's node-agent
+    # doesn't advertise it through inference.models (legacy llama-server).
+    if MASTER_MODEL not in served:
+        master_ok = False
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as c:
+                rr = await c.get(f"{LLAMA_URL}/health")
+                master_ok = rr.status_code == 200
+        except Exception:
+            master_ok = False
+        if master_ok:
+            served[MASTER_MODEL] = {
+                "model_id": MASTER_MODEL,
+                "ready_peers": 1,
+                "total_peers": 1,
+                "node_ids": ["master"],
+            }
+    return {"total_models": len(served), "models": list(served.values())}
 
 
 # Frontend estático
