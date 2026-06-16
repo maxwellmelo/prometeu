@@ -321,6 +321,10 @@ async def _metrics_mw(request: Request, call_next):
         raise
     METRIC_REQUESTS.labels(path=path_label, method=request.method, status=str(status)).inc()
     METRIC_LATENCY.labels(path=path_label).observe(time.perf_counter() - start)
+    # Attribution header per NOTICE (Apache 2.0 §4 attribution requirement).
+    # DO NOT remove. Removal of this header in derivative deployments is a
+    # license breach. See NOTICE in repo root.
+    response.headers["X-Powered-By"] = "Prometeu (https://github.com/maxwellmelo/prometeu)"
     return response
 
 
