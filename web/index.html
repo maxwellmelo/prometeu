@@ -1,48 +1,152 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prometeu — Community LLM Inference</title><meta name="description" content="Community infrastructure for distributed inference of open source LLMs."><style>
-:root{--bg:#080a0f;--panel:#10141d;--panel2:#151a25;--line:#242b3a;--text:#eef2ff;--muted:#8b95aa;--accent:#ff8a3d;--purple:#a78bfa;--ok:#4ade80;--warn:#facc15;--bad:#ef4444;--blue:#60a5fa}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,rgba(167,139,250,.18),transparent 30%),radial-gradient(circle at top right,rgba(255,138,61,.16),transparent 28%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}.nav{position:sticky;top:0;z-index:10;background:rgba(8,10,15,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}.navin{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 20px}.brand{display:flex;align-items:center;gap:10px;font-weight:800}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#ff5e3a);display:grid;place-items:center;color:#190d04}.links{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:13px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 16px;background:var(--panel);color:var(--text);font-weight:700}.btn.primary{background:linear-gradient(135deg,var(--accent),#ff5e3a);border-color:transparent;color:#190d04}.btn.purple{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.35);color:#ddd6fe}.hero{padding:76px 0 44px}.eyebrow{color:var(--purple);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12px}.hero h1{font-size:clamp(40px,7vw,76px);line-height:.95;margin:14px 0 18px;letter-spacing:-.06em;max-width:940px}.lead{font-size:clamp(18px,2vw,22px);color:#c9d2e3;max-width:850px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:18px;padding:18px}.card h3{margin:0 0 8px;font-size:17px}.muted{color:var(--muted)}.section{padding:38px 0}.section h2{font-size:32px;letter-spacing:-.03em;margin:0 0 14px}.stat{font-size:34px;font-weight:900;letter-spacing:-.04em}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:12px;background:rgba(255,255,255,.03)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{overflow:auto;background:#05070b;border:1px solid var(--line);border-radius:14px;padding:14px}.cols3>.card{grid-column:span 4}.cols4>.card{grid-column:span 3}.cols2>.card{grid-column:span 6}.footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13px;margin-top:40px}.status-dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--muted);box-shadow:0 0 0 transparent}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.status-dot.ok{background:var(--ok);box-shadow:0 0 12px var(--ok)}.status-dot.warn{background:var(--warn)}.status-dot.bad{background:var(--bad)}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:10px;text-align:left}th{color:var(--muted);font-weight:700}@media(max-width:760px){.links{display:none}.cols3>.card,.cols4>.card,.cols2>.card{grid-column:1/-1}.hero{padding-top:46px}.hero h1{font-size:42px}}
-</style></head><body><div class="nav"><div class="navin wrap"><a class="brand" href="/"><span class="logo">P</span><span>Prometeu</span></a><div class="links"><a href="/dashboard.html">Dashboard</a><a href="/chat.html">Chat</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a></div></div></div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prometeu — Community LLM Inference</title>
+<meta name="description" content="Community infrastructure for distributed inference of open source LLMs. Contribute capacity, run a node, call a shared /v1 inference gateway.">
+<meta property="og:title" content="Prometeu — Shared inference capacity for communities">
+<meta property="og:description" content="Open source distributed infrastructure for serving open LLMs.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/prometeu.css">
+<style>
+.hero-wrap{position:relative;overflow:hidden}
+.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+.netviz{position:relative;height:300px;border:1px solid var(--line);border-radius:var(--r-xl);background:linear-gradient(180deg,var(--panel),var(--bg-soft));overflow:hidden}
+.netviz svg{width:100%;height:100%}
+.node-c{fill:var(--accent)}.node-w{fill:var(--purple)}
+.edge{stroke:rgba(167,139,250,.35);stroke-width:1.5}
+.pulse{animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.flow{stroke-dasharray:4 6;animation:flow 1.6s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-20}}
+.diagram{display:grid;gap:10px}
+.dstep{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel)}
+.dnum{width:28px;height:28px;border-radius:8px;background:var(--purple-soft);border:1px solid rgba(167,139,250,.3);color:#ddd6fe;display:grid;place-items:center;font-weight:800;font-size:13px;flex:0 0 auto}
+@media (max-width:760px){.hero-grid{grid-template-columns:1fr}.netviz{height:230px;order:-1}}
+</style>
+</head>
+<body>
+<nav class="nav"><div class="navin wrap">
+  <a class="brand" href="/"><span class="logo">P</span><span>Prometeu</span></a>
+  <button class="navtoggle" aria-label="Menu" onclick="document.getElementById('nav-links').classList.toggle('open')">☰</button>
+  <div class="links" id="nav-links">
+    <a href="/dashboard.html">Dashboard</a>
+    <a href="/chat.html">Chat</a>
+    <a href="/node.html">Run a node</a>
+    <a class="btn sm" href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</div></nav>
+
 <main>
-<section class="hero wrap">
-  <div class="eyebrow">Open source LLM infrastructure</div>
-  <h1>Shared inference capacity for communities.</h1>
-  <p class="lead">Prometeu turns ordinary machines into a distributed network for serving open source language models. It starts with Q8 bootstrap models for quality, then scales toward medium and large models as community capacity grows. Users can consume capacity, contributors can run nodes, and the network measures real work through signed receipts and reciprocity.</p>
-  <div class="actions"><a class="btn primary" href="/dashboard.html">View network dashboard</a><a class="btn purple" href="/node.html">Run a node</a><a class="btn" href="/chat.html">Try chat</a><a class="btn" href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a></div>
-</section>
-<section class="section wrap"><div class="grid cols4">
-  <div class="card"><div class="stat" id="statNodes">—</div><div class="muted">online nodes</div></div>
-  <div class="card"><div class="stat" id="statPools">—</div><div class="muted">model pools</div></div>
-  <div class="card"><div class="stat" id="statPeers">—</div><div class="muted">mesh peers</div></div>
-  <div class="card"><div class="stat" id="statModels">—</div><div class="muted">allowlisted models</div></div>
+<section class="hero hero-wrap"><div class="wrap"><div class="hero-grid">
+  <div>
+    <div class="eyebrow">Open source LLM infrastructure</div>
+    <h1>Shared inference capacity for communities.</h1>
+    <p class="lead">Turn ordinary machines into a distributed network for serving open source language models. Consume capacity, contribute a node, and let signed receipts measure real work.</p>
+    <div class="actions">
+      <a class="btn primary" href="/node.html">Run a node →</a>
+      <a class="btn purple" href="/dashboard.html">View network</a>
+      <a class="btn ghost" href="/chat.html">Try chat</a>
+    </div>
+  </div>
+  <div class="netviz" aria-hidden="true">
+    <svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet">
+      <line class="edge flow" x1="200" y1="150" x2="90" y2="70"/>
+      <line class="edge flow" x1="200" y1="150" x2="320" y2="80"/>
+      <line class="edge flow" x1="200" y1="150" x2="80" y2="230"/>
+      <line class="edge flow" x1="200" y1="150" x2="330" y2="220"/>
+      <line class="edge flow" x1="200" y1="150" x2="200" y2="40"/>
+      <circle class="node-w pulse" cx="90" cy="70" r="9"/>
+      <circle class="node-w pulse" cx="320" cy="80" r="9"/>
+      <circle class="node-w pulse" cx="80" cy="230" r="9"/>
+      <circle class="node-w pulse" cx="330" cy="220" r="9"/>
+      <circle class="node-w pulse" cx="200" cy="40" r="9"/>
+      <circle class="node-c" cx="200" cy="150" r="18"/>
+      <text x="200" y="155" text-anchor="middle" fill="#190d04" font-size="14" font-weight="900" font-family="Inter">P</text>
+    </svg>
+  </div>
+</div></div></section>
+
+<section class="section"><div class="wrap">
+  <div class="grid cols4" id="stats">
+    <div class="card stat-card"><div class="stat" id="statNodes">—</div><div class="lbl">online nodes</div></div>
+    <div class="card stat-card"><div class="stat" id="statPools">—</div><div class="lbl">model pools</div></div>
+    <div class="card stat-card"><div class="stat" id="statPeers">—</div><div class="lbl">mesh peers</div></div>
+    <div class="card stat-card"><div class="stat" id="statModels">—</div><div class="lbl">allowlisted models</div></div>
+  </div>
 </div></section>
-<section class="section wrap"><h2>What Prometeu does</h2><div class="grid cols3">
-  <div class="card"><h3>/v1 inference gateway</h3><p class="muted">Apps, CLIs, bots and UIs call a common chat/completions endpoint with streaming support.</p></div>
-  <div class="card"><h3>Model pool orchestration</h3><p class="muted">The coordinator sizes GGUF models, selects peers, warms pools and tracks READY/DEGRADED/FAILED state.</p></div>
-  <div class="card"><h3>Participant nodes</h3><p class="muted">Anyone can contribute controlled CPU/RAM/GPU capacity through a local daemon and dashboard.</p></div>
-  <div class="card"><h3>Hash-pinned allowlist</h3><p class="muted">Nodes only load curated models with known sha256 hashes. No unverified fallback.</p></div>
-  <div class="card"><h3>Reciprocity ledger</h3><p class="muted">Serving tokens earns standing. Contributors receive more usage headroom while anonymous users keep a baseline floor.</p></div>
-  <div class="card"><h3>Open observability</h3><p class="muted">Pools, peers, registry state and Prometheus metrics expose what the network is doing.</p></div>
+
+<section class="section"><div class="wrap">
+  <h2>What Prometeu does</h2>
+  <p class="sub">Six building blocks turn donated capacity into a verifiable, shared inference network.</p>
+  <div class="grid cols3">
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>/v1 inference gateway</h3><p class="muted">Apps, CLIs, bots and UIs call a common chat/completions endpoint with streaming support.</p></div>
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></span>Model pool orchestration</h3><p class="muted">The coordinator sizes GGUF models, selects peers, warms pools and tracks READY / DEGRADED / FAILED state.</p></div>
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><path d="M7 7h.01M7 17h.01"/></svg></span>Participant nodes</h3><p class="muted">Anyone can contribute controlled CPU / RAM / GPU capacity through a local daemon and dashboard.</p></div>
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>Hash-pinned allowlist</h3><p class="muted">Nodes only load curated models with known sha256 hashes. No unverified fallback.</p></div>
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></span>Reciprocity ledger</h3><p class="muted">Serving tokens earns standing. Contributors get more usage headroom while anonymous users keep a baseline floor.</p></div>
+    <div class="card hover"><h3><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>Open observability</h3><p class="muted">Pools, peers, registry state and Prometheus metrics expose what the network is doing.</p></div>
+  </div>
 </div></section>
-<section class="section wrap"><h2>How it works</h2><div class="card"><pre>App/User ──POST /v1/chat/completions──▶ Gateway
-                                            │
-                                            ├─ rate limit + token metering
-                                            ├─ model/pool routing
-                                            ├─ reciprocity accounting
-                                            ▼
-                                 Pool / participant node
-                                            │
-                                            ├─ verify allowlisted model hash
-                                            ├─ run sandboxed inference
-                                            └─ emit signed receipts</pre></div></section>
-<section class="section wrap"><h2>Start building</h2><div class="grid cols2"><div class="card"><h3>Use the API</h3><pre>curl -X POST http://YOUR_COORDINATOR:3000/v1/chat/completions \
+
+<section class="section"><div class="wrap">
+  <h2>How it works</h2>
+  <p class="sub">A request flows from any client through the gateway down to a verified participant node.</p>
+  <div class="diagram">
+    <div class="dstep"><span class="dnum">1</span><div><strong>Client → Gateway</strong><div class="muted">App / user POSTs to <span class="mono">/v1/chat/completions</span>.</div></div></div>
+    <div class="dstep"><span class="dnum">2</span><div><strong>Gateway</strong><div class="muted">Rate limit + token metering · model / pool routing · reciprocity accounting.</div></div></div>
+    <div class="dstep"><span class="dnum">3</span><div><strong>Pool / participant node</strong><div class="muted">Verify allowlisted model hash · run sandboxed inference · emit signed receipts.</div></div></div>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <h2>Start building</h2>
+  <p class="sub">Two ways in: call the shared API, or donate capacity by running a node.</p>
+  <div class="grid cols2">
+    <div class="card"><h3 class="mt0">Use the API</h3>
+      <div class="code mt16"><button class="copy" data-copy>Copy</button><pre>curl -X POST https://your-coordinator.example/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"qwen","messages":[{"role":"user","content":"Hello"}]}'</pre></div><div class="card"><h3>Run a node</h3><pre>curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/install.sh | sudo bash</pre><p class="muted">For guided installation, open <a href="/node.html">Run a node</a>.</p></div></div></section>
-</main><footer class="footer"><div class="wrap">⚡ Powered by <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> · Community infrastructure for open source LLM inference.</div></footer><script>
+  -d '{"model":"qwen","messages":[{"role":"user","content":"Hello"}]}'</pre></div>
+    </div>
+    <div class="card"><h3 class="mt0">Run a node</h3>
+      <div class="code mt16"><button class="copy" data-copy>Copy</button><pre>curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/install.sh | sudo bash</pre></div>
+      <p class="muted mt16">For guided installation, open <a href="/node.html">Run a node →</a></p>
+    </div>
+  </div>
+</div></section>
+</main>
+
+<footer class="footer"><div class="wrap">
+  <span>⚡ <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> — community infrastructure for open source LLM inference.</span>
+  <span class="links" style="position:static;display:flex;flex-direction:row;background:none;border:none;padding:0">
+    <a href="/dashboard.html">Dashboard</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub ↗</a>
+  </span>
+</div></footer>
+
+<script>
+/* copy buttons */
+document.querySelectorAll('[data-copy]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const pre=b.parentElement.querySelector('pre');
+    navigator.clipboard.writeText(pre.innerText).then(()=>{
+      b.textContent='Copied ✓';b.classList.add('ok');
+      setTimeout(()=>{b.textContent='Copy';b.classList.remove('ok')},1600);
+    });
+  });
+});
+/* live stats */
 async function j(url){try{const r=await fetch(url,{cache:'no-store'});return r.ok?await r.json():null}catch(e){return null}}
 async function refresh(){
- const [nodes,pools,peers,allow]=await Promise.all([j('/api/registry/nodes'),j('/api/pools'),j('/api/mesh/peers'),j('/api/catalog/allowlist')]);
- document.getElementById('statNodes').textContent=nodes?(nodes.online??(nodes.nodes||[]).filter(n=>n.online).length):'—';
- document.getElementById('statPools').textContent=pools?(pools.total??(pools.pools||[]).length):'—';
- document.getElementById('statPeers').textContent=peers?(peers.total??(peers.peers||[]).length):'—';
- document.getElementById('statModels').textContent=allow?(allow.total??(allow.models||allow.allowlist||[]).length):'—';
-}refresh();setInterval(refresh,10000);
-</script></body></html>
+  const [nodes,pools,peers,allow]=await Promise.all([j('/api/registry/nodes'),j('/api/pools'),j('/api/mesh/peers'),j('/api/catalog/allowlist')]);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=(v===null||v===undefined)?'—':v};
+  set('statNodes',nodes?(nodes.online??(nodes.nodes||[]).filter(n=>n.online).length):null);
+  set('statPools',pools?(pools.total??(pools.pools||[]).length):null);
+  set('statPeers',peers?(peers.total??(peers.peers||[]).length):null);
+  set('statModels',allow?(allow.total??(allow.models||allow.allowlist||[]).length):null);
+}
+refresh();setInterval(refresh,10000);
+</script>
+</body></html>

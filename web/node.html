@@ -4,34 +4,101 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Prometeu — Run a Node</title>
+<meta name="description" content="Run a Prometeu node and contribute CPU/RAM/GPU capacity to a distributed open source LLM network.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/prometeu.css">
 <style>
-:root{--bg:#080a0f;--panel:#10141d;--line:#242b3a;--text:#eef2ff;--muted:#8b95aa;--accent:#ff8a3d;--purple:#a78bfa}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,rgba(167,139,250,.18),transparent 30%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-decoration:none}.wrap{max-width:1180px;margin:0 auto;padding:0 20px}.nav{position:sticky;top:0;z-index:10;background:rgba(8,10,15,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}.navin{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 20px}.brand{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--text)}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#ff5e3a);display:grid;place-items:center;color:#190d04}.links{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:13px}.section{padding:38px 0}.eyebrow{color:var(--purple);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12px}.lead{font-size:clamp(18px,2vw,22px);color:#c9d2e3;max-width:850px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:18px;padding:18px}.cols2>.card{grid-column:span 6}.muted{color:var(--muted)}.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 16px;background:#10141d;color:var(--text);font-weight:700;cursor:pointer}.btn.primary{background:linear-gradient(135deg,var(--accent),#ff5e3a);border-color:transparent;color:#190d04}pre{overflow:auto;background:#05070b;border:1px solid var(--line);border-radius:14px;padding:14px}.step{display:flex;gap:14px}.num{width:34px;height:34px;border-radius:50%;background:rgba(255,138,61,.18);border:1px solid rgba(255,138,61,.35);display:grid;place-items:center;font-weight:900;color:var(--accent);flex:0 0 auto}.footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13px;margin-top:40px}@media(max-width:760px){.links{display:none}.cols2>.card{grid-column:1/-1}}
+.steps{display:grid;gap:14px;grid-template-columns:repeat(2,1fr)}
+.step{display:flex;gap:14px;align-items:flex-start}
+.num{width:34px;height:34px;border-radius:50%;background:rgba(255,138,61,.18);border:1px solid rgba(255,138,61,.4);color:var(--accent);display:grid;place-items:center;font-weight:800;flex:0 0 auto}
+.ctrl-list{margin:0;padding-left:18px;color:var(--muted)}
+.ctrl-list li{margin:4px 0}
+@media (max-width:760px){.steps{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="nav"><div class="navin wrap"><a class="brand" href="/"><span class="logo">P</span><span>Prometeu</span></a><div class="links"><a href="/dashboard.html">Dashboard</a><a href="/chat.html">Chat</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a></div></div></div>
-<main class="wrap section">
-  <div class="eyebrow">Contribute capacity</div>
-  <h1 style="font-size:48px;letter-spacing:-.05em;margin:8px 0 12px">Run a Prometeu node</h1>
-  <p class="lead">You do not need to be a programmer. A node is a machine you allow Prometeu to use within limits you control. The installer sets up a local dashboard, detects your hardware, starts a service, and reports health to the coordinator.</p>
-  <div class="grid cols2" style="margin-top:22px">
-    <div class="card"><h3>Fast install</h3><p class="muted">Recommended for Debian/Ubuntu machines.</p><pre id="cmd">curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/install.sh | sudo bash</pre><button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('cmd').textContent)">Copy command</button></div>
-    <div class="card"><h3>What you control</h3><ul class="muted"><li>CPU limit</li><li>RAM limit</li><li>participation mode</li><li>models allowed by catalog</li><li>when to stop the service</li></ul></div>
+<nav class="nav"><div class="navin wrap">
+  <a class="brand" href="/"><span class="logo">P</span><span>Prometeu</span></a>
+  <button class="navtoggle" aria-label="Menu" onclick="document.getElementById('nav-links').classList.toggle('open')">☰</button>
+  <div class="links" id="nav-links">
+    <a href="/dashboard.html">Dashboard</a>
+    <a href="/chat.html">Chat</a>
+    <a href="/node.html" class="active">Run a node</a>
+    <a class="btn sm" href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub ↗</a>
   </div>
-  <section class="section"><h2>Guided steps</h2><div class="grid cols2">
-    <div class="card step"><div class="num">1</div><div><h3>Prepare a Linux machine</h3><p class="muted">Use Debian/Ubuntu if possible. Keep it plugged in and connected to internet.</p></div></div>
-    <div class="card step"><div class="num">2</div><div><h3>Run one command</h3><p class="muted">Copy install command above into a terminal. It installs packages, node daemon, local dashboard and inference binaries when available.</p></div></div>
-    <div class="card step"><div class="num">3</div><div><h3>Open local dashboard</h3><p class="muted">After install, open <code>http://localhost:8787</code> on that machine to view hardware, limits and preflight checks.</p></div></div>
-    <div class="card step"><div class="num">4</div><div><h3>Watch public dashboard</h3><p class="muted">Your node should appear in <a href="/dashboard.html">network dashboard</a> if it can reach coordinator.</p></div></div>
-  </div></section>
-  <section class="section"><h2>Useful commands</h2><div class="grid cols2">
-    <div class="card"><h3>Check service</h3><pre>systemctl status prometeu-node --no-pager</pre></div>
-    <div class="card"><h3>View logs</h3><pre>journalctl -u prometeu-node -f</pre></div>
-    <div class="card"><h3>Preflight</h3><pre>curl http://localhost:8787/api/node/preflight</pre></div>
-    <div class="card"><h3>Stop node</h3><pre>sudo systemctl stop prometeu-node</pre></div>
-  </div></section>
-  <section class="section"><h2>Non-programmer installer roadmap</h2><div class="card"><p class="muted">Next step: package a small desktop helper that checks OS support, explains permissions, asks for CPU/RAM limits, runs installation, opens dashboard, and shows plain-language errors. Until then, this page is guided path.</p></div></section>
+</div></nav>
+
+<main>
+<section class="hero"><div class="wrap">
+  <div class="eyebrow">Contribute capacity</div>
+  <h1>Run a Prometeu node</h1>
+  <p class="lead">You don't need to be a programmer. A node is a machine you allow Prometeu to use within limits you control. The installer sets up a local dashboard, detects your hardware, starts a service, and reports health to the coordinator.</p>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <div class="grid cols2">
+    <div class="card"><h3 class="mt0">Fast install</h3>
+      <p class="muted">Recommended for Debian / Ubuntu machines.</p>
+      <div class="code mt16"><button class="copy" data-copy>Copy</button><pre id="cmd">curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/install.sh | sudo bash</pre></div>
+    </div>
+    <div class="card"><h3 class="mt0">What you control</h3>
+      <ul class="ctrl-list mt16">
+        <li>CPU limit</li>
+        <li>RAM limit</li>
+        <li>Participation mode</li>
+        <li>Models allowed by catalog</li>
+        <li>When to stop the service</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <h2>Guided steps</h2>
+  <p class="sub">Four steps from a bare Linux machine to a node visible on the public network.</p>
+  <div class="steps">
+    <div class="card step"><span class="num">1</span><div><h3 class="mt0">Prepare a Linux machine</h3><p class="muted">Use Debian / Ubuntu if possible. Keep it plugged in and connected to the internet.</p></div></div>
+    <div class="card step"><span class="num">2</span><div><h3 class="mt0">Run one command</h3><p class="muted">Paste the install command above into a terminal. It installs packages, the node daemon, a local dashboard and inference binaries when available.</p></div></div>
+    <div class="card step"><span class="num">3</span><div><h3 class="mt0">Open the local dashboard</h3><p class="muted">After install, open <code class="mono">http://localhost:8787</code> on that machine to view hardware, limits and preflight checks.</p></div></div>
+    <div class="card step"><span class="num">4</span><div><h3 class="mt0">Watch the public dashboard</h3><p class="muted">Your node should appear on the <a href="/dashboard.html">network dashboard</a> once it can reach the coordinator.</p></div></div>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <h2>Useful commands</h2>
+  <p class="sub">Manage the node service after installation.</p>
+  <div class="grid cols2">
+    <div class="card"><h3 class="mt0">Check service</h3><div class="code mt16"><button class="copy" data-copy>Copy</button><pre>systemctl status prometeu-node --no-pager</pre></div></div>
+    <div class="card"><h3 class="mt0">View logs</h3><div class="code mt16"><button class="copy" data-copy>Copy</button><pre>journalctl -u prometeu-node -f</pre></div></div>
+    <div class="card"><h3 class="mt0">Preflight</h3><div class="code mt16"><button class="copy" data-copy>Copy</button><pre>curl http://localhost:8787/api/node/preflight</pre></div></div>
+    <div class="card"><h3 class="mt0">Stop node</h3><div class="code mt16"><button class="copy" data-copy>Copy</button><pre>sudo systemctl stop prometeu-node</pre></div></div>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <h2>Roadmap: one-click installer</h2>
+  <div class="card"><p class="muted">Next step: a small desktop helper that checks OS support, explains permissions, asks for CPU / RAM limits, runs installation, opens the dashboard, and shows plain-language errors. Until then, this page is the guided path.</p></div>
+</div></section>
 </main>
-<footer class="footer"><div class="wrap">⚡ Powered by <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> · Community infrastructure for open source LLM inference.</div></footer>
-</body>
-</html>
+
+<footer class="footer"><div class="wrap">
+  <span>⚡ <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> — community infrastructure for open source LLM inference.</span>
+  <span class="links" style="position:static;display:flex;flex-direction:row;background:none;border:none;padding:0">
+    <a href="/">Home</a><a href="/dashboard.html">Dashboard</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub ↗</a>
+  </span>
+</div></footer>
+
+<script>
+document.querySelectorAll('[data-copy]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const pre=b.parentElement.querySelector('pre');
+    navigator.clipboard.writeText(pre.innerText).then(()=>{
+      b.textContent='Copied ✓';b.classList.add('ok');
+      setTimeout(()=>{b.textContent='Copy';b.classList.remove('ok')},1600);
+    });
+  });
+});
+</script>
+</body></html>

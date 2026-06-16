@@ -4,114 +4,95 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Prometeu — Chat</title>
+<meta name="description" content="Chat with an open source model served by the Prometeu distributed network.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/prometeu.css">
 <style>
-  :root {
-    --bg: #0b0d12;
-    --panel: #11141b;
-    --line: #1d2230;
-    --text: #e6e9ef;
-    --mute: #7a8294;
-    --accent: #ff8a3d;
-    --ok: #4ade80;
-    --bad: #ef4444;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column;
-  }
-  header {
-    padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .logo {
-    width: 34px; height: 34px; border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), #ff5e3a);
-    display: grid; place-items: center; font-weight: 800; color: #1a0d05;
-  }
-  h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
-  .sub { color: var(--mute); font-size: 12px; }
-  .nodes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 760px; }
-  .node {
-    padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px;
-    font-size: 11px; background: var(--panel); min-width: 170px;
-  }
-  .nodeTop { display: flex; align-items: center; gap: 7px; font-weight: 700; margin-bottom: 4px; }
-  .nodeStats { color: var(--mute); display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: 0 0 auto; }
-  .node.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .node.active { border-color: var(--accent); box-shadow: 0 0 12px rgba(255,138,61,.15); }
-  .pulse { color: var(--accent); font-weight: 800; margin-left: auto; }
-  main { flex: 1; display: flex; flex-direction: column; max-width: 920px; width: 100%; margin: 0 auto; padding: 16px; gap: 12px; }
-  #chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px 24px; }
-  .msg { padding: 12px 14px; border-radius: 12px; max-width: 88%; white-space: pre-wrap; word-wrap: break-word; }
-  .msg.user { background: #1c2230; align-self: flex-end; }
-  .msg.bot { background: var(--panel); border: 1px solid var(--line); align-self: flex-start; }
-  .msg.bot .meta { font-size: 11px; color: var(--mute); margin-top: 8px; }
-  .composer { display: flex; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: var(--panel); }
-  textarea {
-    flex: 1; border: 0; outline: 0; background: transparent; color: var(--text);
-    resize: none; font: inherit; min-height: 44px; max-height: 200px;
-  }
-  button {
-    border: 0; border-radius: 10px; padding: 0 18px; background: var(--accent); color: #1a0d05;
-    font-weight: 700; cursor: pointer; font-size: 14px;
-  }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  footer { text-align: center; color: var(--mute); font-size: 11px; padding: 12px; border-top: 1px solid var(--line); }
-  a { color: var(--accent); text-decoration: none; }
-  .empty { color: var(--mute); text-align: center; padding: 40px 16px; }
-  .badge { display: inline-block; padding: 2px 8px; background: #1c2230; border-radius: 999px; font-size: 11px; color: var(--mute); }
+body{display:flex;flex-direction:column;height:100vh;background-attachment:initial}
+.chat-head{border-bottom:1px solid var(--line);background:rgba(7,9,16,.82);backdrop-filter:blur(14px);position:sticky;top:0;z-index:30}
+.chat-head .top{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;flex-wrap:wrap}
+.head-meta .sub{color:var(--muted);font-size:12px}
+.nodes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:640px}
+.node{padding:7px 10px;border:1px solid var(--line);border-radius:10px;font-size:11px;background:var(--panel);min-width:158px}
+.nodeTop{display:flex;align-items:center;gap:7px;font-weight:700;margin-bottom:4px}
+.nodeStats{color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}
+.node.ok .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.node.active{border-color:var(--accent);box-shadow:0 0 12px rgba(255,138,61,.15)}
+.pulse{color:var(--accent);font-weight:800;margin-left:auto}
+.active-llms{background:var(--purple-soft);border:1px solid rgba(167,139,250,.25);border-radius:var(--r);padding:14px;margin:14px 0}
+.chat-body{flex:1;display:flex;flex-direction:column;max-width:920px;width:100%;margin:0 auto;padding:0 16px 14px;min-height:0;gap:12px}
+#chat{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:14px 2px 24px;-webkit-overflow-scrolling:touch}
+.msg{padding:12px 14px;border-radius:14px;max-width:88%;white-space:pre-wrap;word-wrap:break-word;line-height:1.55}
+.msg.user{background:#1c2230;align-self:flex-end;border:1px solid var(--line)}
+.msg.bot{background:var(--panel);border:1px solid var(--line);align-self:flex-start}
+.msg.bot .meta{font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--line-soft);padding-top:6px}
+.composer{display:flex;gap:8px;border:1px solid var(--line);border-radius:14px;padding:8px;background:var(--panel);position:sticky;bottom:8px}
+textarea{flex:1;border:0;outline:0;background:transparent;color:var(--text);resize:none;font:inherit;min-height:44px;max-height:200px;padding:8px}
+.composer button{border:0;border-radius:10px;padding:0 20px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#1a0d05;font-weight:800;cursor:pointer;font-size:14px}
+.composer button:disabled{opacity:.5;cursor:not-allowed}
+.empty{color:var(--muted);text-align:center;padding:40px 16px}
+.empty p{margin:8px 0}
+.badge{display:inline-block;padding:3px 10px;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;font-size:11px;color:var(--muted)}
+.chat-foot{text-align:center;color:var(--muted);font-size:11px;padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+@media (max-width:760px){
+  .nodes{justify-content:flex-start;max-width:100%}
+  .node{min-width:calc(50% - 4px)}
+  .chat-head .top{padding:10px 0}
+  .msg{max-width:94%}
+}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <div class="logo">P</div>
-    <div>
-      <h1>Prometeu</h1>
-      <div class="sub">Test an open source model served by the Prometeu network</div>
-    </div>
+<header class="chat-head"><div class="wrap">
+  <div class="top">
+    <a class="brand" href="/"><span class="logo">P</span>
+      <span class="head-meta"><span style="display:block;font-size:16px">Prometeu</span><span class="sub">Open source model · served by the network</span></span>
+    </a>
+    <div class="nodes" id="nodes"></div>
   </div>
-  <div class="nodes" id="nodes"></div>
-  <nav style="padding:10px 24px;border-bottom:1px solid var(--line);display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:13px">
-    <a href="/">Home</a><a href="/dashboard.html">Network dashboard</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub</a>
-  </nav>
-</header>
+</div></header>
 
-<section id="activeLLMs" style="max-width:980px;margin:0 auto;padding:0 14px 14px">
-  <div style="background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.25);border-radius:14px;padding:14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <strong style="font-size:13px;letter-spacing:.5px">⚡ MODELS ACTIVE NOW</strong>
-      <span id="activeCount" style="color:var(--muted);font-size:11px">—</span>
-    </div>
-    <div id="activeList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px"></div>
-    <div style="margin-top:8px;font-size:11px;color:var(--muted)">
-      Sorted by peers · capacity = cores·100 + RAM/GB ·
-      <a href="/api/catalog/active" target="_blank" style="color:#a78bfa">JSON</a> ·
-      <a href="/api/catalog/llms" target="_blank" style="color:#a78bfa">top catalog</a>
-    </div>
+<nav class="nav" style="position:static"><div class="navin wrap" style="min-height:46px">
+  <div class="links" id="nav-links" style="position:static;display:flex;flex-direction:row;background:none;border:none;padding:0;justify-content:center;width:100%">
+    <a href="/">Home</a><a href="/dashboard.html">Network dashboard</a><a href="/node.html">Run a node</a><a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">GitHub ↗</a>
   </div>
-</section>
+</div></nav>
 
-<main>
+<div class="chat-body">
+  <section id="activeLLMs">
+    <div class="active-llms">
+      <div class="spread" style="margin-bottom:8px">
+        <strong style="font-size:13px;letter-spacing:.5px">⚡ MODELS ACTIVE NOW</strong>
+        <span id="activeCount" class="muted" style="font-size:11px">—</span>
+      </div>
+      <div id="activeList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;font-size:12px"></div>
+      <div class="muted" style="margin-top:8px;font-size:11px">
+        Sorted by peers · capacity = cores·100 + RAM/GB ·
+        <a href="/api/catalog/active" target="_blank">JSON</a> ·
+        <a href="/api/catalog/llms" target="_blank">top catalog</a>
+      </div>
+    </div>
+  </section>
+
   <div id="chat">
     <div class="empty">
       <p>👋 Ask an open source model currently served through Prometeu.</p>
       <p>Requests are routed through the gateway to available community capacity.</p>
-      <p>Ask below. <span class="badge">No account · community access · open source</span></p>
+      <p><span class="badge">No account · community access · open source</span></p>
     </div>
   </div>
   <form class="composer" id="form">
     <textarea id="input" placeholder="Ask anything…" rows="2"></textarea>
     <button type="submit" id="send">Send</button>
   </form>
-</main>
+</div>
 
-<footer>
-  <a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener" style="color:#a78bfa;font-weight:600;text-decoration:none">⚡ Powered by Prometeu</a> · <span id="pool">network: —</span> · <span id="mesh">mesh: —</span> · <a href="/api/nodes" target="_blank">/api/nodes</a> · <a href="/api/registry/nodes" target="_blank">/api/registry/nodes</a> · <a href="/api/mesh/peers" target="_blank">/api/mesh/peers</a> · <a href="/api/health" target="_blank">/api/health</a>
+<footer class="chat-foot">
+  <a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener" style="font-weight:600">⚡ Powered by Prometeu</a>
+  <span id="pool">network: —</span><span id="mesh">mesh: —</span>
+  <a href="/api/health" target="_blank">/api/health</a>
 </footer>
 
 <script>
@@ -199,7 +180,7 @@ async function refreshActiveLLMs() {
     const count = document.getElementById("activeCount");
     count.textContent = `${d.total_models} LLM(s) · ${d.total_peers} peer(s)`;
     if (!d.models || d.models.length === 0) {
-      list.innerHTML = `<div style="color:var(--muted);grid-column:1/-1">No public node is hosting a model yet. Install a node at <a href="https://github.com/maxwellmelo/prometeu" style="color:#a78bfa">github.com/maxwellmelo/prometeu</a> and become one of the first contributors.</div>`;
+      list.innerHTML = `<div style="color:var(--muted);grid-column:1/-1">No public node is hosting a model yet. Install a node at <a href="https://github.com/maxwellmelo/prometeu">github.com/maxwellmelo/prometeu</a> and become one of the first contributors.</div>`;
       return;
     }
     list.innerHTML = d.models.slice(0, 12).map((m, i) => {
