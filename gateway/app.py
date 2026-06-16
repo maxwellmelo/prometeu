@@ -288,6 +288,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Prometeu Gateway", lifespan=lifespan)
 
+# ─── CORS ────────────────────────────────────────────────────────────
+# Participant node dashboards (served from http://localhost:8787) fetch
+# the public read-only catalog/registry endpoints directly from the
+# coordinator. Browsers block those cross-origin reads unless the
+# coordinator returns CORS headers. These endpoints are public and
+# read-only, so a permissive origin policy is safe here. No credentials
+# are used (token auth is header-based, not cookie-based).
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # ─── Rate limiting (slowapi) ─────────────────────────────────────────
 RATE_LIMIT_V1 = os.getenv("PROMETEU_RATE_LIMIT_V1", "30/minute")
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
