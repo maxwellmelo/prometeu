@@ -1,0 +1,93 @@
+Prometeu — Distributed LLM Inference
+Copyright 2026 Maxwell Melo
+
+This product includes software developed by Maxwell Melo and the Prometeu
+contributors (https://github.com/maxwellmelo/prometeu).
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. You may obtain a copy
+of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+ATTRIBUTION REQUIREMENTS (Apache 2.0 §4)
+================================================================================
+
+This NOTICE file is REQUIRED reading. Section 4(d) of the Apache License 2.0
+mandates that you preserve the contents of this NOTICE file in any
+redistribution, including derivative works.
+
+Beyond the minimum required by Apache 2.0, the Prometeu project requests —
+and contributors interpret §4(d) to require — the following END-USER VISIBLE
+attribution for any product, service, application, model, dataset, fine-tune,
+research artifact, demo, or commercial offering that incorporates Prometeu
+in whole or in substantial part:
+
+1. ANY user-facing interface (web UI, mobile app, desktop client, terminal
+   client, API documentation, OpenAPI/Swagger UI, embedded widget) MUST
+   display the text:
+
+       "Powered by Prometeu"
+
+   The text MUST be a clickable hyperlink pointing to:
+
+       https://github.com/maxwellmelo/prometeu
+
+   The link MUST be visible without scrolling or hovering on a primary
+   surface — accepted locations: footer, about page, splash screen,
+   "credits" modal, sidebar, header. The link MUST NOT be hidden behind
+   `display:none`, `visibility:hidden`, color-matched-to-background, font
+   size below 10px, or screen-reader-only attributes.
+
+2. ANY API endpoint that proxies, wraps, fine-tunes, or otherwise builds
+   on Prometeu MUST include in every successful HTTP response the header:
+
+       X-Powered-By: Prometeu (https://github.com/maxwellmelo/prometeu)
+
+   This header MUST NOT be stripped by intermediate proxies under your
+   control.
+
+3. ANY published model card, dataset card, research paper, blog post,
+   technical write-up, or marketing material that references inference,
+   training, or fine-tuning performed on a Prometeu node or cluster MUST
+   cite the project by name and link to the canonical repository.
+
+4. ANY redistribution of the source code, binaries, container images, or
+   compiled artifacts MUST preserve this NOTICE file unmodified in the
+   distribution root, alongside the LICENSE file.
+
+5. Removal, obfuscation, or circumvention of any attribution requirement
+   above constitutes a material breach of the Apache License 2.0 §4(d)
+   ("You must retain, in the Source form of any Derivative Works that You
+   distribute, all copyright, patent, trademark, and attribution notices
+   from the Source form of the Work") and terminates the license grant
+   per §4 of the License.
+
+================================================================================
+BADGE (recommended)
+================================================================================
+
+For HTML/Markdown interfaces, embed:
+
+    [![Powered by Prometeu](https://img.shields.io/badge/powered_by-Prometeu-7c3aed?style=flat-square)](https://github.com/maxwellmelo/prometeu)
+
+Or copy `assets/powered-by-prometeu.svg` from the repository.
+
+================================================================================
+TRADEMARK
+================================================================================
+
+"Prometeu" and the Prometeu logo are trademarks of Maxwell Melo. The
+Apache 2.0 license does NOT grant rights to use these trademarks except as
+required for the attribution above. Forks and derivative works MUST NOT
+present themselves as the official Prometeu project, and MUST NOT use
+"Prometeu" in their project name without prior written consent.
+
+================================================================================
+CONTACT
+================================================================================
+
+Questions about attribution compliance, commercial use, or trademark
+licensing: open an issue at https://github.com/maxwellmelo/prometeu/issues
+or contact the maintainers via the repository.
