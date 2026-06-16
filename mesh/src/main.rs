@@ -86,6 +86,10 @@ enum Cmd {
         /// Capability label expected on the remote side.
         #[arg(long, default_value = "rpc-worker")]
         capability: String,
+
+        /// Discovery gateway base URL for submitting signed receipts. Empty disables submit.
+        #[arg(long, env = "PROMETEU_MESH_DISCOVERY", default_value = DEFAULT_DISCOVERY_URL)]
+        discovery: String,
     },
 }
 
@@ -138,8 +142,8 @@ async fn main() -> Result<()> {
             };
             serve::run(id, &forward, &capability, ad, &discovery).await
         }
-        Cmd::Dial { peer, listen, capability } => {
-            dial::run(id, &peer, &listen, &capability).await
+        Cmd::Dial { peer, listen, capability, discovery } => {
+            dial::run(id, &peer, &listen, &capability, &cli.db, &discovery).await
         }
         Cmd::Peers { discovery, capability } => {
             let url = format!(

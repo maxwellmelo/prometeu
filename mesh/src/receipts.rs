@@ -67,3 +67,34 @@ impl Store {
         Ok(self.0.last_insert_rowid())
     }
 }
+
+/// Best-effort submission of a signed receipt to the gateway aggregator.
+///
+/// Fire-and-forget: errors are logged but never bubbled up — the local SQLite
+/// store remains the canonical ledger, the gateway aggregate is a public view.
+pub fn spawn_submit(discovery: String, signed: ReceiptSigned) {
+    let base = discovery.trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        let url = format!("{base}/api/mesh/receipts");
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(?e, "receipt submit client build failed");
+                return;
+            }
+        };
+        match client.post(&url).json(&signed).send().await {
+            Ok(r) if r.status().is_success() => {
+                tracing::info!(url = %url, session = %signed.receipt.session_id, "receipt submitted to gateway");
+            }
+            Ok(r) => tracing::warn!(status = %r.status(), url = %url, "receipt submit non-2xx"),
+            Err(e) => tracing::warn!(?e, url = %url, "receipt submit error"),
+        }
+    });
+}
