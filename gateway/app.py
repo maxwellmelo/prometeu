@@ -56,6 +56,11 @@ try:
 except ImportError:  # pragma: no cover
     from gateway.sizer import size_model  # type: ignore[no-redef]
 
+try:
+    import pools as poolmod  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway import pools as poolmod  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
 # The built-in master peer serves this legacy model directly via LLAMA_URL.
@@ -113,6 +118,10 @@ class NodeJoin(BaseModel):
     status: str = "available"
     dashboard_url: str | None = None
     rpc_endpoint: str | None = None
+    # inference summary advertised by the node-agent (Fase 1+): which models the
+    # peer is currently serving, their local endpoints, and ready state. Used by
+    # the router (Fase 2) and pool orchestrator (Fase 4).
+    inference: dict[str, Any] = {}
 
 
 class NodeHeartbeat(NodeJoin):
@@ -916,6 +925,211 @@ async def api_catalog_size(model_id: str, source: str = "hf", context: int = 204
         return JSONResponse({"error": "bad_request", "message": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": "sizing_failed", "message": str(e)}, status_code=502)
+
+
+# ---------------------------------------------------------------------------
+# Pool orchestration (Fase 4)
+# ---------------------------------------------------------------------------
+REDIS_POOL_PREFIX = "prometeu:pools:"
+REDIS_POOL_INDEX = "prometeu:pools:index"
+POOL_TTL_SEC = int(os.getenv("PROMETEU_POOL_TTL_SEC", "3600"))
+
+
+def _pool_key(pool_id: str) -> str:
+    return f"{REDIS_POOL_PREFIX}{pool_id}"
+
+
+async def _save_pool(pool: poolmod.Pool) -> None:
+    r = _redis()
+    await r.set(_pool_key(pool.pool_id), json.dumps(pool.to_dict()), ex=POOL_TTL_SEC)
+    await r.sadd(REDIS_POOL_INDEX, pool.pool_id)
+
+
+async def _load_pool(pool_id: str) -> poolmod.Pool | None:
+    r = _redis()
+    raw = await r.get(_pool_key(pool_id))
+    if not raw:
+        return None
+    try:
+        return poolmod.Pool.from_dict(json.loads(raw))
+    except Exception:
+        return None
+
+
+async def _list_pools() -> list[poolmod.Pool]:
+    r = _redis()
+    ids = sorted(await r.smembers(REDIS_POOL_INDEX))
+    if not ids:
+        return []
+    vals = await r.mget([_pool_key(p) for p in ids])
+    out, stale = [], []
+    for pid, raw in zip(ids, vals):
+        if raw is None:
+            stale.append(pid)
+            continue
+        try:
+            out.append(poolmod.Pool.from_dict(json.loads(raw)))
+        except Exception:
+            stale.append(pid)
+    if stale:
+        await r.srem(REDIS_POOL_INDEX, *stale)
+    return out
+
+
+async def _ready_node_ids_for(model_id: str) -> set[str]:
+    """node_ids whose heartbeat reports `model_id` as ready."""
+    nodes = await _list_registry_nodes()
+    ready: set[str] = set()
+    for n in nodes:
+        if not n.get("online"):
+            continue
+        inf = n.get("inference") or {}
+        for m in inf.get("models", []):
+            if m.get("ready") and _model_matches(model_id, m.get("model_id", "")):
+                ready.add(n.get("node_id"))
+    return ready
+
+
+async def _node_inference_endpoint(node_id: str) -> str | None:
+    """Resolve a peer's node-agent control endpoint (for load/unload)."""
+    nodes = await _list_registry_nodes()
+    for n in nodes:
+        if n.get("node_id") == node_id:
+            # node-agent exposes its API on its dashboard host:8787
+            host = (n.get("hardware") or {}).get("host") or n.get("host")
+            dash = n.get("dashboard_url")
+            if dash:
+                return dash.rstrip("/")
+            if host:
+                return f"http://{host}:8787"
+    return None
+
+
+async def _instruct_peer_load(node_id: str, pool: poolmod.Pool) -> bool:
+    ep = await _node_inference_endpoint(node_id)
+    if not ep or not pool.gguf_url or not pool.sha256:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.post(f"{ep}/api/node/load", json={
+                "model_id": pool.model_id,
+                "gguf_url": pool.gguf_url,
+                "sha256": pool.sha256,
+                "ctx_size": pool.context,
+            })
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
+async def _instruct_peer_unload(node_id: str, model_id: str) -> bool:
+    ep = await _node_inference_endpoint(node_id)
+    if not ep:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.post(f"{ep}/api/node/unload", json={"model_id": model_id})
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
+class PoolRequest(BaseModel):
+    model_id: str
+    source: str = "hf"
+    context: int = 2048
+    sha256: str | None = None
+
+
+@app.post("/api/pools/request")
+async def api_pool_request(req: PoolRequest):
+    """Request that a model be served by a pool. Sizes the model, picks peers
+    with enough RAM, instructs them to load, and tracks warming to quorum."""
+    # 1. Size the model against current peer RAM to get min_peers + per-peer RAM.
+    peers_ram = await _peers_available_ram_mb()
+    try:
+        report = await asyncio.to_thread(size_model, req.model_id, req.source, req.context, peers_ram or None)
+    except NotImplementedError as e:
+        return JSONResponse({"error": "unsupported_source", "message": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": "sizing_failed", "message": str(e)}, status_code=502)
+
+    plan = report.get("pool") or {}
+    min_peers = int(plan.get("min_peers") or 1)
+    ram_per_peer = int(plan.get("ram_per_peer_mb") or report["ram"]["total_ram_mb"])
+
+    pool_id = poolmod.make_pool_id(req.model_id, req.source)
+    existing = await _load_pool(pool_id)
+    if existing and existing.state not in poolmod.TERMINAL:
+        return {"pool": existing.to_dict(), "note": "pool already active"}
+
+    pool = poolmod.Pool(
+        pool_id=pool_id, model_id=req.model_id, source=req.source,
+        context=req.context, min_peers=min_peers,
+        gguf_url=report.get("url"), sha256=req.sha256,
+        ram_per_peer_mb=ram_per_peer, state=poolmod.REQUESTED,
+    )
+
+    # 2. Pick candidates and instruct them to load.
+    nodes = await _list_registry_nodes()
+    cands = poolmod.select_warm_candidates(nodes, ram_per_peer, min_peers)
+    if len(cands) < min_peers:
+        pool.state = poolmod.FAILED
+        pool.last_error = f"only {len(cands)} peers meet {ram_per_peer}MB RAM; need {min_peers}"
+        await _save_pool(pool)
+        return JSONResponse({"pool": pool.to_dict(), "error": "insufficient_capacity"}, status_code=409)
+
+    pool.members = [n["node_id"] for n in cands]
+    pool.state = poolmod.WARMING
+    await _save_pool(pool)
+
+    if pool.sha256:
+        results = await asyncio.gather(*[_instruct_peer_load(nid, pool) for nid in pool.members])
+        if not any(results):
+            pool.last_error = "no peer accepted the load instruction"
+    else:
+        pool.last_error = "no sha256 provided; peers will not load until one is supplied (no unverified downloads)"
+    await _save_pool(pool)
+    return {"pool": pool.to_dict(), "sizing": report}
+
+
+@app.get("/api/pools")
+async def api_pools_list():
+    pools = await _list_pools()
+    # Reconcile each against live readiness before returning.
+    out = []
+    for p in pools:
+        ready = await _ready_node_ids_for(p.model_id)
+        poolmod.reconcile(p, ready)
+        await _save_pool(p)
+        out.append(p.to_dict())
+    return {"total": len(out), "pools": out}
+
+
+@app.get("/api/pools/{pool_id}")
+async def api_pool_get(pool_id: str):
+    p = await _load_pool(pool_id)
+    if not p:
+        return JSONResponse({"error": "not_found", "pool_id": pool_id}, status_code=404)
+    ready = await _ready_node_ids_for(p.model_id)
+    poolmod.reconcile(p, ready)
+    await _save_pool(p)
+    return p.to_dict()
+
+
+@app.post("/api/pools/{pool_id}/stop")
+async def api_pool_stop(pool_id: str):
+    p = await _load_pool(pool_id)
+    if not p:
+        return JSONResponse({"error": "not_found", "pool_id": pool_id}, status_code=404)
+    p.state = poolmod.DRAINING
+    p.updated_at = time.time()
+    await _save_pool(p)
+    await asyncio.gather(*[_instruct_peer_unload(nid, p.model_id) for nid in p.members])
+    ready = await _ready_node_ids_for(p.model_id)
+    poolmod.reconcile(p, ready)
+    await _save_pool(p)
+    return p.to_dict()
 
 
 # Frontend estático
