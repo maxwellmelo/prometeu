@@ -325,7 +325,9 @@ Useful endpoints:
 | Endpoint | Purpose |
 |---|---|
 | `POST /v1/chat/completions` | Chat/completions inference. |
-| `GET /api/catalog/allowlist` | List allowed models and expected hashes. |
+| `GET /api/catalog/llms?sort=updated` | Discover latest GGUF models from the public catalog. |
+| `GET /api/catalog/llms?sort=downloads` | Discover popular GGUF models from the public catalog. |
+| `GET /api/catalog/allowlist` | List verified/runnable model candidates and expected hashes. |
 | `POST /api/pools/request` | Request model pool creation/warmup. |
 | `GET /api/pools` | List pools and states. |
 | `GET /api/registry/nodes` | List registered nodes. |
@@ -658,6 +660,7 @@ If you change HTTP contracts, add tests. If you touch security behavior, add rej
 - mTLS between coordinator and peers.
 - Reputation with slashable commitments.
 - Better node onboarding UX.
+- Dashboard sections for latest discovered models, popular models, verified runnable models, and capacity targets.
 - Larger curated catalog with Q8-first policy and explicit lower-quantization fallback only when Q8 is unavailable.
 - Capacity planner showing which medium/large models become runnable as more peers join.
 - Peer health scoring.

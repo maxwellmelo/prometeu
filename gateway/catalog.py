@@ -96,10 +96,11 @@ OLLAMA_CURATED: list[dict[str, Any]] = [
 ]
 
 
-async def _hf_fetch(client: httpx.AsyncClient, limit: int) -> list[dict[str, Any]]:
-    """Top GGUF text-generation models from HF, sorted by downloads."""
+async def _hf_fetch(client: httpx.AsyncClient, limit: int, sort: str = "downloads") -> list[dict[str, Any]]:
+    """GGUF text-generation models from HF, sorted by downloads or lastModified."""
+    hf_sort = "lastModified" if sort == "updated" else "downloads"
     params = {
-        "sort": "downloads",
+        "sort": hf_sort,
         "direction": "-1",
         "limit": str(limit * 2),  # over-fetch; we filter
         "filter": "gguf",
@@ -119,6 +120,7 @@ async def _hf_fetch(client: httpx.AsyncClient, limit: int) -> list[dict[str, Any
             "url": f"https://huggingface.co/{mid}",
             "downloads": int(m.get("downloads") or 0),
             "likes": int(m.get("likes") or 0),
+            "last_modified": m.get("lastModified") or m.get("last_modified"),
             "pipeline_tag": m.get("pipeline_tag"),
             "tags": [t for t in (m.get("tags") or []) if isinstance(t, str)][:12],
         })
@@ -173,6 +175,7 @@ async def fetch_catalog(
     source: str = "all",
     limit: int = 50,
     force_refresh: bool = False,
+    sort: str = "downloads",
 ) -> dict[str, Any]:
     """Read-through Redis cache wrapper around HF + Ollama fetchers.
 
@@ -180,6 +183,7 @@ async def fetch_catalog(
     cache_hits[], errors[].
     """
     limit = max(1, min(limit, 100))
+    sort = sort if sort in {"downloads", "updated"} else "downloads"
     sources = {"all": {"hf", "ollama"}, "hf": {"hf"}, "ollama": {"ollama"}}.get(source, {"hf", "ollama"})
 
     out: dict[str, Any] = {
@@ -189,12 +193,13 @@ async def fetch_catalog(
         "ollama": [],
         "cache_hits": [],
         "errors": [],
+        "sort": sort,
     }
 
     async with httpx.AsyncClient(headers={"User-Agent": "Prometeu/catalog (+https://github.com/maxwellmelo/prometeu)"}) as client:
         tasks = {}
         if "hf" in sources:
-            tasks["huggingface"] = _maybe_fetch(r, client, "huggingface", limit, force_refresh, _hf_fetch)
+            tasks["huggingface"] = _maybe_fetch(r, client, "huggingface", limit, force_refresh, _hf_fetch, sort=sort)
         if "ollama" in sources:
             tasks["ollama"] = _maybe_fetch(r, client, "ollama", limit, force_refresh, _ollama_fetch)
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -216,8 +221,9 @@ async def _maybe_fetch(
     limit: int,
     force_refresh: bool,
     fetcher,
+    sort: str = "downloads",
 ) -> tuple[list[dict[str, Any]], bool]:
-    key = f"prometeu:catalog:{source}:limit{limit}"
+    key = f"prometeu:catalog:{source}:sort{sort}:limit{limit}"
     if not force_refresh:
         raw = await r.get(key)
         if raw:
@@ -225,7 +231,10 @@ async def _maybe_fetch(
                 return json.loads(raw), True
             except Exception:
                 pass  # corrupt cache; refetch
-    items = await fetcher(client, limit)
+    if source == "huggingface":
+        items = await fetcher(client, limit, sort)
+    else:
+        items = await fetcher(client, limit)
     try:
         await r.set(key, json.dumps(items), ex=CATALOG_TTL_SEC)
     except Exception:

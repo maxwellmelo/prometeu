@@ -4,12 +4,37 @@
 <div class="grid cols4" style="margin-top:22px"><div class="card"><div class="stat" id="nodesOnline">—</div><div class="muted">online nodes</div></div><div class="card"><div class="stat" id="poolsTotal">—</div><div class="muted">pools</div></div><div class="card"><div class="stat" id="peersTotal">—</div><div class="muted">mesh peers</div></div><div class="card"><div class="stat" id="modelsTotal">—</div><div class="muted">allowlisted models</div></div></div>
 
 <section class="section"><h2>Capacity planner</h2><p class="muted">Prometeu should not be limited to small models. Small Q8 models bootstrap the network; medium and large models become runnable as more RAM/GPU peers join. Lower quantization is fallback only when Q8 is unavailable or explicitly approved.</p><div class="grid cols3" id="plannerCards"></div></section>
+
+<section class="section"><h2>Latest discovered models</h2><p class="muted">Fresh GGUF models discovered from the public catalog. These are visible to the community before they become verified runnable models. Q8 is preferred; lower quantization should be fallback only.</p><div class="card"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn" onclick="loadLatest('updated')">Latest updated</button><button class="btn" onclick="loadLatest('downloads')">Most downloaded</button><a class="btn" href="/api/catalog/llms?source=hf&limit=50&sort=updated" target="_blank">JSON</a></div><div id="latestModels" class="grid cols3"><p class="muted">Loading latest models…</p></div></div></section>
 <section class="section"><h2>Pools</h2><div class="card"><div id="poolCards" class="grid cols3"></div></div></section>
 <section class="section"><h2>Participant nodes</h2><div class="card"><div style="overflow:auto"><table><thead><tr><th>Node</th><th>Status</th><th>CPU</th><th>RAM</th><th>Models</th><th>Age</th></tr></thead><tbody id="nodesTable"><tr><td colspan="6">Loading…</td></tr></tbody></table></div></div></section>
 <section class="section"><h2>Mesh peers</h2><div class="card"><div id="peersList" class="grid cols3"></div></div></section>
 <section class="section"><h2>Allowlisted models</h2><div class="card"><div id="allowList" class="grid cols3"></div></div></section>
 <section class="section"><h2>Signals</h2><div class="grid cols3"><div class="card"><h3>Watchdog</h3><p id="watchdog" class="muted">Healthy when no pool is FAILED, DEGRADED or under quorum.</p></div><div class="card"><h3>Reciprocity</h3><p class="muted">Contribution is measured from signed receipts. Consumption is metered through /v1.</p><a href="/api/reciprocity/standing" target="_blank">standing endpoint</a></div><div class="card"><h3>Metrics</h3><p class="muted">Prometheus metrics expose pools and reciprocity counters.</p><a href="/metrics" target="_blank">/metrics</a></div></div></section>
 </main><footer class="footer"><div class="wrap">⚡ Powered by <a href="https://github.com/maxwellmelo/prometeu">Prometeu</a> · Community infrastructure for open source LLM inference.</div></footer><script>
+
+
+function tagsOf(m){return (m.tags||[]).join(' ').toLowerCase()}
+function modelFlags(m){
+ const t=tagsOf(m)+' '+String(m.id||'').toLowerCase();
+ const flags=[];
+ if(t.includes('q8')) flags.push('Q8 visible');
+ if(t.includes('qwen3')||t.includes('glm-4.7')||t.includes('gemma-3')||t.includes('gemma4')||t.includes('deepseek-v4')) flags.push('recent family');
+ if(t.includes('coder')||t.includes('code')) flags.push('code');
+ if(t.includes('reasoning')||t.includes('thinking')) flags.push('reasoning');
+ if(t.includes('moe')||t.includes('mixture')) flags.push('MoE');
+ return flags.length?flags:['not verified yet'];
+}
+async function loadLatest(sort='updated'){
+ latestModels.innerHTML='<p class="muted">Loading catalog…</p>';
+ const d=await j(`/api/catalog/llms?source=hf&limit=36&sort=${sort}`);
+ const items=d?.huggingface||[];
+ latestModels.innerHTML=items.length?items.map(m=>{
+   const flags=modelFlags(m).slice(0,3).map(x=>`<span class="pill">${esc(x)}</span>`).join(' ');
+   const lm=m.last_modified?` · updated ${esc(String(m.last_modified).slice(0,10))}`:'';
+   return `<div class="card" style="grid-column:span 4"><h3 title="${esc(m.id)}">${esc(String(m.id||'model').split('/').slice(-1)[0])}</h3><p class="muted">${esc(m.id)}</p><p>${flags}</p><p class="muted">downloads ${fmt(m.downloads)} · likes ${fmt(m.likes)}${lm}</p><p><a href="${esc(m.url)}" target="_blank" rel="noopener">model page</a> · <span class="muted">candidate for verification</span></p></div>`
+ }).join(''):'<p class="muted">No models returned.</p>';
+}
 
 const plannerModels=[
  {name:'Qwen2.5 1.5B Q8',tier:'Small / runnable soon',ram:3,need:'2–3 CPU peers',status:'Q8 preferred bootstrap'},
@@ -40,5 +65,5 @@ async function refresh(){
  nodesTable.innerHTML=nodeList.length?nodeList.map(n=>`<tr><td>${esc(n.display_name||n.node_id)}</td><td><span class="status-dot ${n.online?'ok':'bad'}"></span> ${esc(n.status||'—')}</td><td>${fmt(n.hardware?.telemetry?.cpu_percent)}%</td><td>${fmt(n.hardware?.telemetry?.ram_available_mb)} MB free</td><td>${esc((n.models||[]).join(', '))}</td><td>${fmt(Math.round(n.age_sec||0))}s</td></tr>`).join(''):'<tr><td colspan="6">No nodes reported.</td></tr>';
  peersList.innerHTML=peerList.length?peerList.map(p=>`<div class="card" style="grid-column:span 4"><h3>${esc(p.node_id||p.peer_id||p.id)}</h3><p class="muted">${esc(p.capability||'peer')}</p><p>${esc(p.addr||p.endpoint||'announced')}</p></div>`).join(''):'<p class="muted">No mesh peers reported.</p>';
  allowList.innerHTML=allowModels.length?allowModels.slice(0,24).map(m=>`<div class="card" style="grid-column:span 4"><h3>${esc((m.model_id||m.id||m.name||'model').split('/').slice(-1)[0])}</h3><p class="muted" title="${esc(m.model_id||m.id)}">${esc(m.model_id||m.id)}</p><p><span class="pill">sha256 pinned</span></p></div>`).join(''):'<p class="muted">No allowlist reported.</p>';
-}refresh();setInterval(refresh,8000);
+}refresh();loadLatest("updated");setInterval(refresh,8000);
 </script></body></html>

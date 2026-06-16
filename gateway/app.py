@@ -485,18 +485,19 @@ async def registry_nodes():
 
 
 @app.get("/api/catalog/llms")
-async def catalog_llms(source: str = "all", limit: int = 50, refresh: int = 0):
-    """Top LLMs from HuggingFace + curated Ollama list.
+async def catalog_llms(source: str = "all", limit: int = 50, refresh: int = 0, sort: str = "downloads"):
+    """LLM catalog from HuggingFace + curated Ollama list.
 
     Query params:
-        source: all | hf | ollama  (default: all)
-        limit:  1..100             (default: 50)
-        refresh: 1 to force cache miss (cooldown: respect 6h cache otherwise)
+        source: all | hf | ollama       (default: all)
+        limit:  1..100                  (default: 50)
+        sort:   downloads | updated     (default: downloads; HF only)
+        refresh: 1 to force cache miss  (cooldown: respect 6h cache otherwise)
     """
     await init_registry()
     r = _redis()
     try:
-        return await fetch_catalog(r, source=source, limit=limit, force_refresh=bool(refresh))
+        return await fetch_catalog(r, source=source, limit=limit, force_refresh=bool(refresh), sort=sort)
     except Exception as e:
         return JSONResponse({"error": "catalog_fetch_failed", "detail": str(e)}, status_code=502)
 
