@@ -53,6 +53,8 @@ footer a{color:var(--accent2);font-weight:600;text-decoration:none}
     <div class="card"><div class="k">CPU</div><div class="v" id="cpu">—</div></div>
     <div class="card"><div class="k">RAM</div><div class="v" id="ram">—</div></div>
     <div class="card"><div class="k">Rede total</div><div class="v" id="net">—</div></div>
+    <div class="card"><div class="k">GPU / VRAM</div><div class="v" id="gpu" style="font-size:14px">—</div></div>
+    <div class="card"><div class="k">Limits enforcement</div><div class="v" id="limitsState" style="font-size:14px">—</div></div>
   </div>
 
   <div class="card" style="margin-top:14px">
@@ -111,12 +113,18 @@ async function load(){
   $('cpu').textContent=fmt(t.cpu_percent,'%')+` / ${h.cpu_count} cores`;
   $('ram').textContent=`${t.ram_used_mb}MB (${fmt(t.ram_percent,'%')})`;
   $('net').textContent=`RX ${t.net_total_rx_mb}MB · TX ${t.net_total_tx_mb}MB`;
+  const gpus=h.gpus||[];
+  $('gpu').textContent=gpus.length?gpus.map(g=>`${g.vendor} ${g.model||''} ${g.vram_mb?g.vram_mb+'MB':'VRAM ?'}`).join(' · '):'nenhuma';
+  const rl=d.resource_limits||{};
+  $('limitsState').textContent=rl.applied?'enforced':'not enforced';
+  $('limitsState').className='v '+(rl.applied?'ok':'bad');
   $('hb').textContent=hb.ok?'online':'erro'; $('hb').className='v '+(hb.ok?'ok':'bad'); $('dot').className='dot '+(hb.ok?'on':'');
   $('displayName').value=c.display_name||''; $('mode').value=c.mode||'public'; $('status').value=c.status||'available';
   $('activeModelInput').value=c.active_model||'';
   $('modelsInput').value=(c.models||[]).join(',');
   $('cpuLimit').value=c.limits?.cpu_percent||50; $('ramLimit').value=c.limits?.ram_mb||1024; $('bwLimit').value=c.limits?.bandwidth_mbps||20;
   $('raw').textContent=JSON.stringify(d,null,2);
+  if(d.resource_limits && !d.resource_limits.applied && d.resource_limits.err) $('catStatus').textContent='limits: '+d.resource_limits.err;
 }
 
 async function fetchCatalog(source){
