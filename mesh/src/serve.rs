@@ -61,9 +61,10 @@ pub async fn run(
         let forward = forward.to_string();
         let capability = capability.to_string();
         let server_node_id = server_node_id.clone();
+        let discovery_owned = discovery.to_string();
         tokio::spawn(async move {
             if let Err(e) =
-                handle_conn(id, incoming, &forward, &capability, &server_node_id).await
+                handle_conn(id, incoming, &forward, &capability, &server_node_id, &discovery_owned).await
             {
                 tracing::warn!(?e, "conn handler failed");
             }
@@ -78,6 +79,7 @@ async fn handle_conn(
     forward: &str,
     capability: &str,
     server_node_id: &str,
+    discovery: &str,
 ) -> Result<()> {
     let connecting = incoming
         .accept()
@@ -163,6 +165,7 @@ async fn handle_conn(
         let capability_owned = capability.to_string();
         let id_for_task = id.clone();
         let server_node_id_owned = server_node_id.to_string();
+        let discovery_owned = discovery.to_string();
 
         tokio::spawn(async move {
             let (mut upstream_r, mut upstream_w) = upstream.into_split();
@@ -218,6 +221,7 @@ async fn handle_conn(
             if let Ok(j) = serde_json::to_string(&signed) {
                 tracing::info!(target: "prometeu_mesh::receipt", "{}", j);
             }
+            crate::receipts::spawn_submit(discovery_owned, signed);
         });
     }
 }

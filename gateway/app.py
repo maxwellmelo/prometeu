@@ -352,6 +352,126 @@ async def mesh_peers(capability: str | None = None):
     }
 
 
+# --- mesh receipts (signed work ledger aggregator) ---
+
+REDIS_RECEIPTS_PREFIX = "prometeu:mesh:receipts:"
+REDIS_RECEIPTS_INDEX = "prometeu:mesh:receipts:index"
+REDIS_RECEIPTS_RECENT = "prometeu:mesh:receipts:recent"
+RECEIPTS_RECENT_MAX = int(os.getenv("PROMETEU_RECEIPTS_RECENT_MAX", "200"))
+
+
+def _receipts_key(node_id: str) -> str:
+    return f"{REDIS_RECEIPTS_PREFIX}{node_id}"
+
+
+@app.post("/api/mesh/receipts")
+async def mesh_receipts_ingest(payload: dict[str, Any]):
+    """Ingest a signed receipt from a mesh node (dialer or server side).
+
+    Body shape: ReceiptSigned JSON from prometeu-mesh:
+      { receipt: {session_id, server_node_id, dialer_node_id, capability,
+                  bytes_in, bytes_out, tokens_served, opened_at, closed_at, ...},
+        server_sig, dialer_sig }
+    """
+    receipt = payload.get("receipt") or {}
+    session_id = str(receipt.get("session_id", "")).strip()
+    server_node_id = str(receipt.get("server_node_id", "")).strip()
+    dialer_node_id = str(receipt.get("dialer_node_id", "")).strip()
+    if not session_id or not (server_node_id or dialer_node_id):
+        return JSONResponse({"ok": False, "error": "receipt missing session_id or node ids"}, status_code=400)
+    try:
+        bytes_in = int(receipt.get("bytes_in", 0))
+        bytes_out = int(receipt.get("bytes_out", 0))
+        tokens_served = int(receipt.get("tokens_served", 0))
+        closed_at = int(receipt.get("closed_at", int(time.time())))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "invalid numeric fields"}, status_code=400)
+
+    server_sig = str(payload.get("server_sig", ""))
+    dialer_sig = str(payload.get("dialer_sig", ""))
+    # Side: which party signed this submission (dialer-side or server-side).
+    side = "server" if server_sig and not dialer_sig else ("dialer" if dialer_sig and not server_sig else "both")
+
+    r = _redis()
+    # Aggregate per-node (only credit the signing side to avoid double count when both sides POST)
+    targets: list[str] = []
+    if side in ("server", "both"):
+        if server_node_id:
+            targets.append(server_node_id)
+    if side == "dialer" and dialer_node_id:
+        targets.append(dialer_node_id)
+
+    for nid in targets:
+        key = _receipts_key(nid)
+        await r.hincrby(key, "bytes_in", bytes_in)
+        await r.hincrby(key, "bytes_out", bytes_out)
+        await r.hincrby(key, "tokens_served", tokens_served)
+        await r.hincrby(key, "sessions", 1)
+        await r.hset(key, "last_seen", closed_at)
+        await r.sadd(REDIS_RECEIPTS_INDEX, nid)
+
+    summary = {
+        "session_id": session_id,
+        "server_node_id": server_node_id,
+        "dialer_node_id": dialer_node_id,
+        "bytes_in": bytes_in,
+        "bytes_out": bytes_out,
+        "tokens_served": tokens_served,
+        "closed_at": closed_at,
+        "side": side,
+        "received_at": int(time.time()),
+    }
+    await r.lpush(REDIS_RECEIPTS_RECENT, json.dumps(summary))
+    await r.ltrim(REDIS_RECEIPTS_RECENT, 0, RECEIPTS_RECENT_MAX - 1)
+    return {"ok": True, "credited": targets, "side": side}
+
+
+@app.get("/api/mesh/receipts")
+async def mesh_receipts_summary(node_id: str | None = None, recent: int = 20):
+    r = _redis()
+    if node_id:
+        h = await r.hgetall(_receipts_key(node_id))
+        return {
+            "schema": "prometeu/mesh/receipts/1",
+            "node_id": node_id,
+            "totals": {k: (int(v) if k != "last_seen" else int(v)) for k, v in h.items()} if h else {},
+        }
+    ids = await r.smembers(REDIS_RECEIPTS_INDEX)
+    nodes: list[dict[str, Any]] = []
+    grand = {"bytes_in": 0, "bytes_out": 0, "tokens_served": 0, "sessions": 0}
+    for nid in ids:
+        h = await r.hgetall(_receipts_key(nid))
+        if not h:
+            continue
+        entry = {"node_id": nid}
+        for k, v in h.items():
+            try:
+                entry[k] = int(v)
+            except (TypeError, ValueError):
+                entry[k] = v
+        for k in ("bytes_in", "bytes_out", "tokens_served", "sessions"):
+            if isinstance(entry.get(k), int):
+                grand[k] += entry[k]
+        nodes.append(entry)
+    nodes.sort(key=lambda e: e.get("bytes_out", 0) + e.get("bytes_in", 0), reverse=True)
+
+    recent_n = max(0, min(int(recent), RECEIPTS_RECENT_MAX))
+    recent_list: list[dict[str, Any]] = []
+    if recent_n:
+        raws = await r.lrange(REDIS_RECEIPTS_RECENT, 0, recent_n - 1)
+        for raw in raws:
+            try:
+                recent_list.append(json.loads(raw))
+            except Exception:
+                continue
+    return {
+        "schema": "prometeu/mesh/receipts/1",
+        "totals": grand,
+        "nodes": nodes,
+        "recent": recent_list,
+    }
+
+
 @app.post("/api/mesh/leave")
 async def mesh_leave(payload: dict[str, Any]):
     node_id = str(payload.get("node_id", "")).strip()

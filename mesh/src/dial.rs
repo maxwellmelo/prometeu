@@ -18,6 +18,8 @@ pub async fn run(
     peer_hex: &str,
     listen: &str,
     capability: &str,
+    _db_path: &str,
+    discovery: &str,
 ) -> Result<()> {
     let dialer_node_id = hex::encode(id.verifying_key().to_bytes());
     let peer_bytes = hex::decode(peer_hex).context("peer NodeId is not valid hex")?;
@@ -61,6 +63,7 @@ pub async fn run(
         let id = id.clone();
         let dialer_node_id = dialer_node_id.clone();
         let capability = capability.to_string();
+        let discovery = discovery.to_string();
         tokio::spawn(async move {
             tracing::debug!(?peer_local, "local TCP accept");
             if let Err(e) = bridge_one(
@@ -69,6 +72,7 @@ pub async fn run(
                 &id,
                 &dialer_node_id,
                 &capability,
+                &discovery,
                 tcp,
             )
             .await
@@ -85,6 +89,7 @@ async fn bridge_one(
     id: &SigningKey,
     dialer_node_id: &str,
     capability: &str,
+    discovery: &str,
     tcp: tokio::net::TcpStream,
 ) -> Result<()> {
     let session_id = format!("s-{}-{}", &dialer_node_id[..8], rand::random::<u32>());
@@ -164,6 +169,7 @@ async fn bridge_one(
     if let Ok(j) = serde_json::to_string(&signed) {
         tracing::info!(target: "prometeu_mesh::receipt", "{}", j);
     }
+    crate::receipts::spawn_submit(discovery.to_string(), signed);
 
     Ok(())
 }
