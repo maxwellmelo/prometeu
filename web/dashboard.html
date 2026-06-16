@@ -20,6 +20,10 @@
 .seg .btn.on{background:var(--purple-soft);color:#ddd6fe}
 .card h3{font-size:16px}
 .card .pill+h3{margin-top:8px}
+.break{overflow-wrap:anywhere;word-break:break-word}
+.mono{font-family:var(--mono);font-size:12px;line-height:1.45}
+.peer-id{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:760px){.peer-id{white-space:normal}.card h3{line-height:1.25}}
 </style>
 </head>
 <body>
@@ -159,9 +163,9 @@ async function refresh(){
  nodesOnline.textContent=summary?`${summary.nodes_online}/${summary.nodes_total}`:(nodes?(nodes.online??nodeList.filter(n=>n.online).length):'—'); coresTotal.textContent=fmt(cap.cores_logical); ramTotal.textContent=fmt(cap.ram_total_gb); modelsTotal.textContent=summary?fmt(summary.models_live_count):(allow?(allow.total??allowModels.length):'—');
  poolCards.innerHTML=poolList.length?poolList.map(p=>`<div class="card hover"><span class="pill"><span class="status-dot ${stateClass(p.state)}"></span>&nbsp;${esc(p.state)}</span><h3 title="${esc(p.model_id)}">${esc((p.model_id||'model').split('/').slice(-1)[0])}</h3><p class="muted">${esc(p.model_id)}</p><p class="mt8">Members: <b>${fmt((p.members||[]).length)}</b> · Ready: <b>${fmt((p.ready_members||[]).length)}</b> · Min peers: <b>${fmt(p.min_peers)}</b></p>${p.last_error?`<p class="bad">${esc(p.last_error)}</p>`:''}</div>`).join(''):'<p class="muted">No pools reported.</p>';
  const incident=poolList.find(p=>p.state==='FAILED'||p.state==='DEGRADED'||(['REQUESTED','WARMING','READY'].includes(p.state)&&((p.ready_members||[]).length<(p.min_peers||0)))); watchdog.innerHTML=incident?`<span class="bad">Incident signal:</span> ${esc(incident.state)} · ${esc(incident.model_id)}`:'<span class="ok">No active incident detected from public pool state.</span>';
- nodesTable.innerHTML=nodeList.length?nodeList.map(n=>`<tr><td data-label="Node">${esc(n.display_name||n.node_id)}</td><td data-label="Status"><span class="status-dot ${n.online?'ok':'bad'}"></span> ${esc(n.status||'—')}</td><td data-label="CPU">${fmt(n.hardware?.telemetry?.cpu_percent)}%</td><td data-label="RAM">${fmt(n.hardware?.telemetry?.ram_available_mb)} MB free</td><td data-label="Models">${esc((n.models||[]).join(', '))}</td><td data-label="Age">${fmt(Math.round(n.age_sec||0))}s</td></tr>`).join(''):'<tr><td colspan="6">No nodes reported.</td></tr>';
- peersList.innerHTML=peerList.length?peerList.map(p=>`<div class="card hover"><h3>${esc(p.node_id||p.peer_id||p.id)}</h3><p class="muted">${esc(p.capability||'peer')}</p><p class="mt8">${esc(p.addr||p.endpoint||'announced')}</p></div>`).join(''):'<p class="muted">No mesh peers reported.</p>';
- allowList.innerHTML=allowModels.length?allowModels.slice(0,24).map(m=>`<div class="card hover"><h3>${esc((m.model_id||m.id||m.name||'model').split('/').slice(-1)[0])}</h3><p class="muted" title="${esc(m.model_id||m.id)}">${esc(m.model_id||m.id)}</p><p class="mt8"><span class="pill ok">sha256 pinned</span></p></div>`).join(''):'<p class="muted">No allowlist reported.</p>';
+ nodesTable.innerHTML=nodeList.length?nodeList.map(n=>`<tr><td data-label="Node">${esc(n.display_name||n.node_id)}</td><td data-label="Status"><span class="status-dot ${n.online?'ok':'bad'}"></span> ${esc(n.status||'—')}</td><td data-label="CPU">${fmt(n.hardware?.telemetry?.cpu_percent)}%</td><td data-label="RAM">${fmt(n.hardware?.telemetry?.ram_available_mb)} MB free</td><td data-label="Models" class="break">${esc((n.models||[]).join(', '))}</td><td data-label="Age">${fmt(Math.round(n.age_sec||0))}s</td></tr>`).join(''):'<tr><td colspan="6">No nodes reported.</td></tr>';
+ peersList.innerHTML=peerList.length?peerList.map(p=>{const id=String(p.node_id||p.peer_id||p.id||'peer');return `<div class="card hover"><h3 class="mono peer-id" title="${esc(id)}">${esc(id)}</h3><p class="muted">${esc(p.capability||'peer')}</p><p class="mt8 break">${esc(p.addr||p.endpoint||'announced')}</p></div>`}).join(''):'<p class="muted">No mesh peers reported.</p>';
+ allowList.innerHTML=allowModels.length?allowModels.slice(0,24).map(m=>`<div class="card hover"><h3 class="break">${esc((m.model_id||m.id||m.name||'model').split('/').slice(-1)[0])}</h3><p class="muted mono break" title="${esc(m.model_id||m.id)}">${esc(m.model_id||m.id)}</p><p class="mt8"><span class="pill ok">sha256 pinned</span></p></div>`).join(''):'<p class="muted">No allowlist reported.</p>';
 }refresh();loadLatest("updated");setInterval(refresh,8000);
 </script>
 </body></html>
