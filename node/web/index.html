@@ -5,21 +5,68 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Prometeu Node</title>
 <style>
-:root{--bg:#0b0d12;--panel:#11141b;--line:#1d2230;--text:#e6e9ef;--muted:#7a8294;--accent:#ff8a3d;--ok:#4ade80;--bad:#ef4444}
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif} main{max-width:980px;margin:0 auto;padding:20px} h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}.k{color:var(--muted);font-size:12px}.v{font-size:20px;font-weight:800}.ok{color:var(--ok)}.bad{color:var(--bad)} label{display:block;color:var(--muted);font-size:12px;margin-top:10px} input,select{width:100%;background:#0f1219;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px} button{background:var(--accent);color:#1a0d05;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;margin-top:12px} pre{white-space:pre-wrap;overflow:auto;background:#090b10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px}.row{display:flex;gap:10px;align-items:center;justify-content:space-between}.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);display:inline-block}.dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+:root{--bg:#0b0d12;--panel:#11141b;--line:#1d2230;--text:#e6e9ef;--muted:#7a8294;--accent:#ff8a3d;--accent2:#a78bfa;--ok:#4ade80;--bad:#ef4444}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px}
+h1{font-size:24px;margin:0 0 4px} h3{margin:0 0 10px}
+.sub{color:var(--muted);margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.k{color:var(--muted);font-size:12px}
+.v{font-size:20px;font-weight:800}
+.ok{color:var(--ok)} .bad{color:var(--bad)}
+label{display:block;color:var(--muted);font-size:12px;margin-top:10px}
+input,select{width:100%;background:#0f1219;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px}
+button{background:var(--accent);color:#1a0d05;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;margin-top:12px;margin-right:8px}
+button.secondary{background:#2a2f3d;color:var(--text)}
+pre{white-space:pre-wrap;overflow:auto;background:#090b10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);display:inline-block}
+.dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.cat-row{display:grid;grid-template-columns:1fr 90px 110px 90px 90px;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center;font-size:13px}
+.cat-row:hover{background:#0e1117;cursor:pointer}
+.cat-row.selected{background:rgba(167,139,250,.12);border-left:3px solid var(--accent2);padding-left:7px}
+.cat-row .name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-row .meta{color:var(--muted);font-size:11px}
+.tabs{display:flex;gap:4px;margin-bottom:8px}
+.tab{padding:6px 12px;border-radius:8px;cursor:pointer;background:#0f1219;border:1px solid var(--line);font-size:12px}
+.tab.active{background:var(--accent2);color:#0b0d12;border-color:var(--accent2);font-weight:700}
+.badge-attr{background:linear-gradient(90deg,#7c3aed,#ec4899);color:#fff;padding:8px 14px;border-radius:10px;font-weight:700;text-align:center;margin-bottom:14px}
+.badge-attr a{color:#fff;text-decoration:none}
+footer{margin-top:24px;padding:14px;text-align:center;color:var(--muted);font-size:11px;border-top:1px solid var(--line)}
+footer a{color:var(--accent2);font-weight:600;text-decoration:none}
 </style>
 </head>
 <body><main>
   <h1>Prometeu Node</h1>
   <div class="sub">Dashboard local do participante. Este node registra capacidade no coordinator; inferência pública vem na próxima fase.</div>
 
+  <div class="badge-attr">
+    ⚡ <a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener" id="brandLink">Powered by Prometeu</a>
+    — projeto open-source Apache 2.0 com atribuição obrigatória.
+  </div>
+
   <div class="grid">
     <div class="card"><div class="row"><div><div class="k">Status coordinator</div><div class="v" id="hb">—</div></div><span class="dot" id="dot"></span></div></div>
     <div class="card"><div class="k">Node ID</div><div class="v" id="nodeId">—</div></div>
+    <div class="card"><div class="k">Active model</div><div class="v" id="activeModel" style="font-size:14px">—</div></div>
     <div class="card"><div class="k">CPU</div><div class="v" id="cpu">—</div></div>
     <div class="card"><div class="k">RAM</div><div class="v" id="ram">—</div></div>
     <div class="card"><div class="k">Rede total</div><div class="v" id="net">—</div></div>
-    <div class="card"><div class="k">Modelos</div><div class="v" id="models">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="row" style="margin-bottom:8px"><h3>Catálogo de LLMs (Top 50)</h3><span class="k" id="catStatus">carregando…</span></div>
+    <div class="tabs">
+      <div class="tab active" data-source="all" onclick="setSource('all')">All</div>
+      <div class="tab" data-source="hf" onclick="setSource('hf')">HuggingFace (GGUF)</div>
+      <div class="tab" data-source="ollama" onclick="setSource('ollama')">Ollama Library</div>
+      <div class="tab" data-source="active" onclick="setSource('active')">⚡ Active now</div>
+    </div>
+    <div class="cat-row" style="font-weight:700;color:var(--muted);border-bottom:2px solid var(--line)">
+      <div>Model</div><div>Source</div><div>Size / params</div><div>Peers / DL</div><div></div>
+    </div>
+    <div id="catalogList" style="max-height:420px;overflow:auto"></div>
   </div>
 
   <div class="card" style="margin-top:14px">
@@ -27,32 +74,135 @@
     <label>Nome do node</label><input id="displayName">
     <label>Modo</label><select id="mode"><option value="public">public</option><option value="private">private</option><option value="idle-only">idle-only</option></select>
     <label>Status</label><select id="status"><option value="available">available</option><option value="paused">paused</option><option value="offline">offline</option></select>
+    <label>Active model (LLM sendo hospedada)</label><input id="activeModelInput" placeholder="ex: qwen2.5-1.5b-q4 ou meta-llama/Llama-3.2-3B">
     <label>Modelos aceitos (vírgula)</label><input id="modelsInput">
     <label>CPU max %</label><input id="cpuLimit" type="number" min="1" max="100">
     <label>RAM max MB</label><input id="ramLimit" type="number" min="128">
     <label>Banda max Mbps</label><input id="bwLimit" type="number" min="1">
     <button onclick="save()">Salvar + heartbeat</button>
-    <button onclick="heartbeat()">Enviar heartbeat agora</button>
+    <button class="secondary" onclick="heartbeat()">Enviar heartbeat agora</button>
   </div>
 
   <div class="card" style="margin-top:14px"><h3>Raw status</h3><pre id="raw">{}</pre></div>
+
+  <footer>
+    <a href="https://github.com/maxwellmelo/prometeu" target="_blank" rel="noopener">⚡ Powered by Prometeu</a>
+    · Apache 2.0 com cláusula de atribuição obrigatória
+  </footer>
 </main>
 <script>
 let last=null;
+let catCache={all:null,hf:null,ollama:null,active:null};
+let currentSource='all';
 function $(id){return document.getElementById(id)}
 function fmt(n,u=''){return typeof n==='number'?`${n.toFixed(n>=10?0:1)}${u}`:'—'}
+function fmtBytes(b){if(!b)return '—';const u=['B','KB','MB','GB'];let i=0,n=b;while(n>=1024&&i<3){n/=1024;i++}return n.toFixed(1)+u[i]}
+function fmtCount(n){if(!n)return '—';if(n>=1e6)return (n/1e6).toFixed(1)+'M';if(n>=1e3)return (n/1e3).toFixed(1)+'k';return n}
+
+function getCoordBase(){
+  return (last && last.config && last.config.coordinator_url) || 'https://prometeu.mx3dev.com';
+}
+
 async function load(){
   const r=await fetch('/api/status',{cache:'no-store'}); const d=await r.json(); last=d;
   const c=d.config, h=d.hardware, t=d.telemetry, hb=d.heartbeat;
-  $('nodeId').textContent=c.node_id; $('cpu').textContent=fmt(t.cpu_percent,'%')+` / ${h.cpu_count} cores`; $('ram').textContent=`${t.ram_used_mb}MB (${fmt(t.ram_percent,'%')})`; $('net').textContent=`RX ${t.net_total_rx_mb}MB · TX ${t.net_total_tx_mb}MB`; $('models').textContent=(c.models||[]).join(', ');
+  $('nodeId').textContent=c.node_id;
+  $('activeModel').textContent=c.active_model||(c.models||[])[0]||'—';
+  $('cpu').textContent=fmt(t.cpu_percent,'%')+` / ${h.cpu_count} cores`;
+  $('ram').textContent=`${t.ram_used_mb}MB (${fmt(t.ram_percent,'%')})`;
+  $('net').textContent=`RX ${t.net_total_rx_mb}MB · TX ${t.net_total_tx_mb}MB`;
   $('hb').textContent=hb.ok?'online':'erro'; $('hb').className='v '+(hb.ok?'ok':'bad'); $('dot').className='dot '+(hb.ok?'on':'');
-  $('displayName').value=c.display_name||''; $('mode').value=c.mode||'public'; $('status').value=c.status||'available'; $('modelsInput').value=(c.models||[]).join(','); $('cpuLimit').value=c.limits?.cpu_percent||50; $('ramLimit').value=c.limits?.ram_mb||1024; $('bwLimit').value=c.limits?.bandwidth_mbps||20;
+  $('displayName').value=c.display_name||''; $('mode').value=c.mode||'public'; $('status').value=c.status||'available';
+  $('activeModelInput').value=c.active_model||'';
+  $('modelsInput').value=(c.models||[]).join(',');
+  $('cpuLimit').value=c.limits?.cpu_percent||50; $('ramLimit').value=c.limits?.ram_mb||1024; $('bwLimit').value=c.limits?.bandwidth_mbps||20;
   $('raw').textContent=JSON.stringify(d,null,2);
 }
-async function save(){
-  const payload={display_name:$('displayName').value,mode:$('mode').value,status:$('status').value,models:$('modelsInput').value.split(',').map(s=>s.trim()).filter(Boolean),limits:{cpu_percent:Number($('cpuLimit').value),ram_mb:Number($('ramLimit').value),bandwidth_mbps:Number($('bwLimit').value)}};
-  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); await heartbeat(); await load();
+
+async function fetchCatalog(source){
+  if(catCache[source]) return catCache[source];
+  $('catStatus').textContent='buscando ' + source + '…';
+  const base=getCoordBase();
+  try{
+    if(source==='active'){
+      const r=await fetch(base+'/api/catalog/active',{cache:'no-store'});
+      catCache[source]=await r.json();
+    } else {
+      const url=base+'/api/catalog/llms?source='+(source==='all'?'all':source)+'&limit=50';
+      const r=await fetch(url,{cache:'no-store'});
+      catCache[source]=await r.json();
+    }
+    $('catStatus').textContent='atualizado';
+  }catch(e){
+    $('catStatus').textContent='erro: '+e.message;
+    return null;
+  }
+  return catCache[source];
 }
+
+function renderCatalog(source,data){
+  const list=$('catalogList'); list.innerHTML='';
+  if(!data){list.innerHTML='<div class="cat-row"><div class="meta">Sem dados — coordinator offline?</div></div>';return}
+  const current=last?.config?.active_model;
+  let rows=[];
+
+  if(source==='active'){
+    rows=(data.models||[]).map(m=>({
+      id:m.model_id, src:m.source, size:`${m.peers} peers`,
+      meta:`${m.cpu_cores_total} cores · ${(m.ram_mb_total/1024).toFixed(1)}GB`,
+      sortLabel:m.peers,
+    }));
+    if(!rows.length){list.innerHTML='<div class="cat-row"><div class="meta">Nenhuma LLM sendo hospedada por nodes públicos ainda.</div></div>';return}
+  } else {
+    const hf=(data.huggingface||[]).map(m=>({id:m.id,src:'HF',size:m.tags?.find(t=>/[0-9]+[BM]/.test(t))||'—',meta:fmtCount(m.downloads)+' DL',sortLabel:m.downloads}));
+    const ol=(data.ollama||[]).map(m=>({id:m.id,src:'Ollama',size:m.size_bytes_latest?fmtBytes(m.size_bytes_latest):(m.params||'—'),meta:m.family,sortLabel:0}));
+    if(source==='hf') rows=hf;
+    else if(source==='ollama') rows=ol;
+    else rows=[...ol,...hf];
+  }
+
+  rows.forEach(row=>{
+    const div=document.createElement('div');
+    div.className='cat-row'+(row.id===current?' selected':'');
+    div.innerHTML=`<div class="name" title="${row.id}">${row.id}</div><div class="meta">${row.src}</div><div class="meta">${row.size}</div><div class="meta">${row.meta}</div><div><button style="padding:4px 8px;font-size:11px;margin:0" onclick="useModel('${row.id.replace(/'/g,"\\'")}')">Usar</button></div>`;
+    list.appendChild(div);
+  });
+}
+
+async function setSource(s){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.source===s));
+  currentSource=s;
+  const data=await fetchCatalog(s);
+  renderCatalog(s,data);
+}
+
+function useModel(id){
+  $('activeModelInput').value=id;
+  $('activeModelInput').scrollIntoView({behavior:'smooth',block:'center'});
+  $('activeModelInput').focus();
+}
+
+async function save(){
+  const activeModel=$('activeModelInput').value.trim()||null;
+  const modelsList=$('modelsInput').value.split(',').map(s=>s.trim()).filter(Boolean);
+  // ensure active_model is in models list
+  if(activeModel && !modelsList.includes(activeModel)) modelsList.unshift(activeModel);
+  const payload={
+    display_name:$('displayName').value,
+    mode:$('mode').value,
+    status:$('status').value,
+    active_model:activeModel,
+    models:modelsList,
+    limits:{cpu_percent:Number($('cpuLimit').value),ram_mb:Number($('ramLimit').value),bandwidth_mbps:Number($('bwLimit').value)},
+  };
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  await heartbeat();
+  await load();
+}
+
 async function heartbeat(){await fetch('/api/heartbeat',{method:'POST'}).catch(()=>{}); await load();}
-load(); setInterval(load,3000);
+
+load().then(()=>setSource('all'));
+setInterval(load,3000);
+setInterval(()=>{catCache.active=null;if(currentSource==='active')setSource('active')},10000);
 </script></body></html>

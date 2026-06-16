@@ -39,6 +39,13 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+# `catalog` is loaded as a flat sibling module in prod (/opt/prometeu/catalog.py)
+# but as `gateway.catalog` package member in tests/repo. Support both layouts.
+try:
+    from catalog import aggregate_active_llms, fetch_catalog  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from gateway.catalog import aggregate_active_llms, fetch_catalog  # type: ignore[no-redef]
+
 
 LLAMA_URL = os.getenv("PROMETEU_LLAMA_URL", "http://127.0.0.1:8080")
 
@@ -82,6 +89,10 @@ class NodeJoin(BaseModel):
     public_key: str | None = None
     mode: str = "public"
     models: list[str] = []
+    # active_model is the LLM the node is *currently* hosting/contributing to
+    # (more granular than `models` which can be a list of supported LLMs).
+    # Used by /api/catalog/active to rank LLMs by peer count + capacity.
+    active_model: str | None = None
     limits: dict[str, Any] = {}
     hardware: dict[str, Any] = {}
     status: str = "available"
@@ -297,6 +308,10 @@ METRIC_MESH_PEERS = Gauge(
     "prometeu_mesh_peers_online",
     "Mesh peers online in registry (Redis TTL)",
 )
+METRIC_ACTIVE_LLMS = Gauge(
+    "prometeu_active_llms_total",
+    "Distinct LLMs being hosted by at least one online registered node",
+)
 
 
 @app.middleware("http")
@@ -389,6 +404,36 @@ async def registry_nodes():
         "online": sum(1 for n in nodes if n["online"] and n["status"] != "offline"),
         "ttl_sec": REGISTRY_TTL_SEC,
     }
+
+
+# --- catalog (HuggingFace + Ollama) + active LLM stats ---
+
+
+@app.get("/api/catalog/llms")
+async def catalog_llms(source: str = "all", limit: int = 50, refresh: int = 0):
+    """Top LLMs from HuggingFace + curated Ollama list.
+
+    Query params:
+        source: all | hf | ollama  (default: all)
+        limit:  1..100             (default: 50)
+        refresh: 1 to force cache miss (cooldown: respect 6h cache otherwise)
+    """
+    await init_registry()
+    r = _redis()
+    try:
+        return await fetch_catalog(r, source=source, limit=limit, force_refresh=bool(refresh))
+    except Exception as e:
+        return JSONResponse({"error": "catalog_fetch_failed", "detail": str(e)}, status_code=502)
+
+
+@app.get("/api/catalog/active")
+async def catalog_active():
+    """LLMs currently being hosted by registered nodes, ranked by peers + capacity."""
+    await init_registry()
+    nodes = await _list_registry_nodes()
+    result = aggregate_active_llms(nodes)
+    METRIC_ACTIVE_LLMS.set(result["total_models"])
+    return result
 
 
 # --- mesh discovery (Iroh peer registry) ---

@@ -78,6 +78,21 @@
   <div class="nodes" id="nodes"></div>
 </header>
 
+<section id="activeLLMs" style="max-width:980px;margin:0 auto;padding:0 14px 14px">
+  <div style="background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.25);border-radius:14px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:13px;letter-spacing:.5px">⚡ LLMs SENDO HOSPEDADAS AGORA</strong>
+      <span id="activeCount" style="color:var(--muted);font-size:11px">—</span>
+    </div>
+    <div id="activeList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px"></div>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted)">
+      Ordenado por peers (nodes que hospedam) · capacity = cores·100 + RAM/GB ·
+      <a href="/api/catalog/active" target="_blank" style="color:#a78bfa">JSON</a> ·
+      <a href="/api/catalog/llms" target="_blank" style="color:#a78bfa">catálogo top 50</a>
+    </div>
+  </div>
+</section>
+
 <main>
   <div id="chat">
     <div class="empty">
@@ -166,9 +181,39 @@ async function refreshMesh() {
 refreshNodes();
 refreshPool();
 refreshMesh();
+refreshActiveLLMs();
 setInterval(refreshNodes, 1000);
 setInterval(refreshPool, 5000);
 setInterval(refreshMesh, 5000);
+setInterval(refreshActiveLLMs, 8000);
+
+async function refreshActiveLLMs() {
+  try {
+    const r = await fetch("/api/catalog/active", { cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    const list = document.getElementById("activeList");
+    const count = document.getElementById("activeCount");
+    count.textContent = `${d.total_models} LLM(s) · ${d.total_peers} peer(s)`;
+    if (!d.models || d.models.length === 0) {
+      list.innerHTML = `<div style="color:var(--muted);grid-column:1/-1">Nenhum node público está hospedando uma LLM ainda. Instale um node em <a href="https://github.com/maxwellmelo/prometeu" style="color:#a78bfa">github.com/maxwellmelo/prometeu</a> e seja o primeiro.</div>`;
+      return;
+    }
+    list.innerHTML = d.models.slice(0, 12).map((m, i) => {
+      const isHF = m.source === "huggingface";
+      const url = isHF ? `https://huggingface.co/${m.model_id}` : `https://ollama.com/library/${m.model_id}`;
+      const gb = (m.ram_mb_total / 1024).toFixed(1);
+      return `<div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="background:${isHF ? "#ff8a3d" : "#a78bfa"};color:#0b0d12;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700">${isHF ? "HF" : "OLLAMA"}</span>
+          <strong style="font-size:11px;color:var(--muted)">#${i + 1}</strong>
+        </div>
+        <a href="${url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;font-weight:700;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.model_id}">${m.model_id}</a>
+        <div style="color:var(--muted);font-size:11px;margin-top:4px">${m.peers} peer${m.peers > 1 ? "s" : ""} · ${m.cpu_cores_total} cores · ${gb}GB RAM</div>
+      </div>`;
+    }).join("");
+  } catch (e) {}
+}
 
 function addMsg(role, text) {
   if (chat.querySelector(".empty")) chat.querySelector(".empty").remove();
