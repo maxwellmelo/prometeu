@@ -33,9 +33,10 @@ This isn't fast. It isn't groundbreaking. It's a proof that **you can run distri
 |---|---|
 | `llama-server` (master) | OpenAI-compatible HTTP API, loads model, orchestrates RPC |
 | `rpc-server` (workers) | Hosts a slice of the model's tensor graph, computes on demand |
-| FastAPI gateway | Thin proxy + cluster telemetry (`/api/nodes`) |
+| FastAPI gateway | Thin proxy + cluster telemetry (`/api/nodes`) + mesh discovery (`/api/mesh/peers`) |
 | Node Agent | Per-node CPU/RAM/network/process telemetry on `:9100` |
-| HTML/JS frontend | Minimal chat UI with SSE streaming and live node badges |
+| `prometeu-mesh` | Iroh P2P overlay, Ed25519 identity, TCP bridge, signed CBOR receipts |
+| HTML/JS frontend | Minimal chat UI with SSE streaming, live node badges, mesh peer count |
 | Cloudflare Tunnel | Public HTTPS without opening firewall ports |
 
 ## Performance, honestly
@@ -162,14 +163,44 @@ GET  /api/registry/nodes
 POST /api/registry/leave
 ```
 
-Important: this phase only registers capacity. It does **not** route public inference to volunteer nodes yet. Public serving needs an overlay network (WireGuard-style) plus layer assignment and trust/reputation.
+Important: this phase only registers capacity. It does **not** route public inference to volunteer nodes yet. Public serving needs an overlay network plus layer assignment and trust/reputation.
+
+## P2P mesh (experimental)
+
+Sprint 3A adds `prometeu-mesh`, a small Rust binary using [Iroh](https://www.iroh.computer/) as the P2P transport:
+
+```bash
+# Worker: expose local llama.cpp rpc-server through the mesh
+prometeu-mesh serve \
+  --forward 127.0.0.1:50052 \
+  --capability rpc-worker \
+  --meta '{"model":"qwen2.5-1.5b","layers":"9-16","region":"home"}'
+
+# Master: expose remote worker as a local TCP port
+prometeu-mesh dial \
+  --peer <worker-node-id-hex> \
+  --listen 127.0.0.1:60052 \
+  --capability rpc-worker
+```
+
+Properties:
+
+- persistent Ed25519 identity; Iroh `NodeId` equals the public key
+- no router port-forwarding required in normal NAT cases
+- CBOR handshake (`DialerHello` / `ServerAck`)
+- bidirectional TCP bridge over Iroh streams
+- signed per-session receipts with byte counters (`prometeu/receipt/1`)
+- Redis-backed discovery: `POST /api/mesh/announce`, `GET /api/mesh/peers`, `POST /api/mesh/leave`
+
+Current caveat: `llama.cpp` `rpc-server` accepts only one active client; while the production `llama-server` holds the LAN RPC connection, a second mesh client to the same `:50052` will timeout. Full production cutover means running `llama-server --rpc 127.0.0.1:60052,...` against local `prometeu-mesh dial` ports instead of worker LAN IPs.
 
 ## Roadmap
 
 - [x] Fixed 3-node distributed inference proof
 - [x] Per-node telemetry agent and proof script
 - [x] Public node registry + local node dashboard
-- [ ] WireGuard overlay so nodes can join without opening ports
+- [x] Iroh P2P mesh prototype: Ed25519 identity, discovery, TCP bridge, signed receipts
+- [ ] Cut production llama-server RPC over mesh local ports
 - [ ] Coordinator layer scheduler / auto-split
 - [ ] Per-IP rate limit (slowapi)
 - [ ] Heterogeneous workers (one CPU + one tiny GPU)

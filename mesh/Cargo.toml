@@ -1,0 +1,37 @@
+[package]
+name = "prometeu-mesh"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Prometeu P2P mesh: Iroh-based censorship-resistant overlay for distributed LLM inference"
+
+[[bin]]
+name = "prometeu-mesh"
+path = "src/main.rs"
+
+[dependencies]
+iroh = "1.0"
+n0-error = "0.1"
+n0-future = "0.2"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "0.2"
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+rand = "0.8"
+hex = "0.4"
+rusqlite = { version = "0.32", features = ["bundled"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+data-encoding = "2"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+urlencoding = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3
