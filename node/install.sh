@@ -121,6 +121,7 @@ install -m 0644 "$REPO_DIR/node/prometeu_node/__init__.py" "$PREFIX/prometeu_nod
 install -m 0644 "$REPO_DIR/node/requirements.txt" "$PREFIX/requirements.txt"
 install -m 0755 "$REPO_DIR/node/scripts/prometeu-node-apply-limits" /usr/local/bin/prometeu-node-apply-limits
 cp -r "$REPO_DIR/node/web/." "$PREFIX/web/"
+git -C "$REPO_DIR" rev-parse --short HEAD > "$PREFIX/.git-rev" 2>/dev/null || echo unknown > "$PREFIX/.git-rev"
 
 if [[ ! -d "$PREFIX/venv" ]]; then
     python3 -m venv "$PREFIX/venv"
@@ -167,6 +168,9 @@ install_llama_binaries
 install -m 0644 "$REPO_DIR/node/systemd/prometeu-node.service" /etc/systemd/system/prometeu-node.service
 systemctl daemon-reload
 systemctl enable --now prometeu-node
+# If it was already running (re-run / in-place upgrade), enable --now is a no-op
+# and would leave stale code in memory — force a restart so new code runs.
+systemctl restart prometeu-node
 /usr/local/bin/prometeu-node-apply-limits
 sleep 2
 systemctl status prometeu-node --no-pager -n 10 || true
