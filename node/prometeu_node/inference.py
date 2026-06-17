@@ -311,11 +311,22 @@ def unload_model(model_id: str) -> dict[str, Any]:
 def sandbox_preflight() -> dict[str, Any]:
     """Reports whether the host can run inference workloads safely."""
     _ensure_dirs()
+    llama_server_bin = Path(LLAMA_SERVER_BIN).exists()
+    systemd_run = _systemd_available()
+    sandbox_user = _sandbox_user_exists()
+    models_dir_writable = os.access(MODELS_DIR, os.W_OK)
+    # No-fallback rule: every mandatory prerequisite must hold or the node
+    # refuses to serve. can_serve is the single canonical readiness signal
+    # consumed by the gateway and the public install validator.
+    can_serve = bool(
+        llama_server_bin and systemd_run and sandbox_user and models_dir_writable
+    )
     return {
-        "llama_server_bin": Path(LLAMA_SERVER_BIN).exists(),
-        "systemd_run": _systemd_available(),
-        "sandbox_user": _sandbox_user_exists(),
+        "llama_server_bin": llama_server_bin,
+        "systemd_run": systemd_run,
+        "sandbox_user": sandbox_user,
         "models_dir": str(MODELS_DIR),
-        "models_dir_writable": os.access(MODELS_DIR, os.W_OK),
+        "models_dir_writable": models_dir_writable,
         "port_range": list(PORT_RANGE),
+        "can_serve": can_serve,
     }
