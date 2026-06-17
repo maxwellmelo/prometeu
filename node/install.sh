@@ -39,9 +39,11 @@ fi
 log "installing base packages..."
 if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq
-    apt-get install -y -qq --no-install-recommends python3-venv python3-pip curl ca-certificates git
+    # libgomp1 = OpenMP runtime required by llama-server (it links libgomp.so.1)
+    apt-get install -y -qq --no-install-recommends python3-venv python3-pip curl ca-certificates git libgomp1
 elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q python3 python3-pip curl ca-certificates git
+    # libgomp = OpenMP runtime required by llama-server
+    dnf install -y -q python3 python3-pip curl ca-certificates git libgomp
 else
     err "unsupported distro (need apt or dnf)"; exit 1
 fi
