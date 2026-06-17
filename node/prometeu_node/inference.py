@@ -255,6 +255,10 @@ def load_model(
     cpu_quota: int = 50,
     mem_mb: int = 1024,
 ) -> dict[str, Any]:
+    # Critical section #1: inspect current state and clean up a stale entry.
+    # We must NOT hold _lock across the GGUF download / cold start — those take
+    # minutes, and the heartbeat path (list_models -> _lock) would block, expire
+    # the node's registry TTL, and silently drop it from the pool.
     with _lock:
         state = _load_state()
         if model_id in state:
@@ -265,34 +269,40 @@ def load_model(
             if existing.scope_name:
                 _stop_scope(existing.scope_name)
             del state[model_id]
+            _save_state(state)
 
-        gguf_path = download_gguf(gguf_url, sha256)
-        port = _pick_port(state)
-        model = LoadedModel(
-            model_id=model_id,
-            gguf_path=str(gguf_path),
-            sha256=sha256,
-            port=port,
-            ctx_size=ctx_size,
-            rpc_peers=rpc_peers or [],
-        )
-        model = _spawn_llama_server(model, cpu_quota=cpu_quota, mem_mb=mem_mb)
+    # No lock held here: network + process I/O can take minutes.
+    gguf_path = download_gguf(gguf_url, sha256)
+    with _lock:
+        port = _pick_port(_load_state())
+    model = LoadedModel(
+        model_id=model_id,
+        gguf_path=str(gguf_path),
+        sha256=sha256,
+        port=port,
+        ctx_size=ctx_size,
+        rpc_peers=rpc_peers or [],
+    )
+    model = _spawn_llama_server(model, cpu_quota=cpu_quota, mem_mb=mem_mb)
 
-        # Wait up to 90s for /health to go green (cold start can be slow).
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            if health_check(model.port):
-                model.ready = True
-                break
-            time.sleep(2)
-        if not model.ready:
-            if model.scope_name:
-                _stop_scope(model.scope_name)
-            raise RuntimeError("llama-server failed to become healthy within 90s")
+    # Wait up to 90s for /health to go green (cold start can be slow).
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if health_check(model.port):
+            model.ready = True
+            break
+        time.sleep(2)
+    if not model.ready:
+        if model.scope_name:
+            _stop_scope(model.scope_name)
+        raise RuntimeError("llama-server failed to become healthy within 90s")
 
+    # Critical section #2: commit the now-ready model into shared state.
+    with _lock:
+        state = _load_state()
         state[model_id] = model
         _save_state(state)
-        return {"ok": True, "model": asdict(model)}
+    return {"ok": True, "model": asdict(model)}
 
 
 def unload_model(model_id: str) -> dict[str, Any]:
