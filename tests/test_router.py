@@ -51,6 +51,11 @@ def test_select_skips_no_endpoint():
     assert select_peer_for_model("llama3-8b", nodes) is None
 
 
+def test_select_skips_not_ready_model_even_with_endpoint():
+    nodes = [_node("a", True, [{"model_id": "llama3-8b", "ready": False, "endpoint": "http://a:18080"}])]
+    assert select_peer_for_model("llama3-8b", nodes) is None
+
+
 def test_list_served_counts():
     nodes = [
         _node("a", True, [{"model_id": "llama3-8b", "ready": True, "endpoint": "http://a:1"}]),

@@ -49,6 +49,8 @@ def select_peer_for_model(
         for m in inf.get("models", []):
             if not _model_matches(requested_model, m.get("model_id", "")):
                 continue
+            if not m.get("ready"):
+                continue
             endpoint = m.get("endpoint")
             if not endpoint:
                 continue

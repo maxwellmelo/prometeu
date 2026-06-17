@@ -96,6 +96,57 @@ def test_instruct_peer_load_accepts_async_202(monkeypatch):
     )]
 
 
+def test_resolve_target_routes_ready_peer(monkeypatch):
+    async def fake_nodes():
+        return [{
+            "node_id": "node-a",
+            "display_name": "Node A",
+            "online": True,
+            "age_sec": 1,
+            "hardware": {"telemetry": {"ram_available_mb": 4096}},
+            "inference": {"models": [{
+                "model_id": "llama3-8b",
+                "ready": True,
+                "endpoint": "http://10.10.10.50:18080/",
+            }]},
+        }]
+
+    monkeypatch.setattr(G, "_list_registry_nodes", fake_nodes)
+
+    target = asyncio.run(G._resolve_target("llama3-8b"))
+
+    assert target == {
+        "base_url": "http://10.10.10.50:18080",
+        "served_by": "Node A",
+        "node_id": "node-a",
+    }
+
+
+def test_resolve_target_hard_fails_unready_model(monkeypatch):
+    async def fake_nodes():
+        return [{
+            "node_id": "node-a",
+            "display_name": "Node A",
+            "online": True,
+            "age_sec": 1,
+            "hardware": {"telemetry": {"ram_available_mb": 4096}},
+            "inference": {"models": [{
+                "model_id": "llama3-8b",
+                "ready": False,
+                "endpoint": "http://10.10.10.50:18080/",
+            }]},
+        }]
+
+    monkeypatch.setattr(G, "_list_registry_nodes", fake_nodes)
+
+    try:
+        asyncio.run(G._resolve_target("llama3-8b"))
+    except LookupError as e:
+        assert str(e) == "llama3-8b"
+    else:  # pragma: no cover
+        raise AssertionError("unready named model must not route to master fallback")
+
+
 def test_instruct_peer_load_refuses_without_sha256(monkeypatch):
     async def fail_endpoint(node_id: str):  # pragma: no cover - must not be called
         raise AssertionError("endpoint lookup should not happen without sha256")
