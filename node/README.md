@@ -75,11 +75,53 @@ sudo install -m0755 rpc-server   /usr/local/bin/rpc-server
 sudo systemctl restart prometeu-node
 ```
 
-## Uninstall
+## Update
+
+Pull the latest node code + binaries and restart, keeping your config and
+downloaded models:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/update.sh | sudo bash
+```
+
+It refreshes `main.py`/`inference.py`/dashboard, the llama-server binaries
+(verifying they actually run), upgrades Python deps inside the venv, and
+restarts the service. Your `/etc/prometeu-node/config.json` and models in
+`/var/lib/prometeu-node` are left untouched.
+
+## Uninstall
+
+One command — it deregisters the node from the coordinator, stops any running
+inference children, and removes everything:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/maxwellmelo/prometeu/main/node/uninstall.sh | sudo bash
+```
+
+Flags:
+- `--purge` — also delete downloaded GGUF models *and* the llama.cpp binaries +
+  shared libs (`/opt/llama.cpp`). Default keeps models so a reinstall doesn't
+  re-download gigabytes.
+- `--yes` — skip the confirmation prompt (for automation).
+
+Manual removal (equivalent, if you can't run the script):
+
+```bash
+# deregister (optional — coordinator drops you via heartbeat TTL anyway)
+NODE_ID=$(python3 -c 'import json;print(json.load(open("/etc/prometeu-node/config.json"))["node_id"])')
+curl -fsS -X POST https://prometeu.mx3dev.com/api/registry/leave \
+  -H 'Content-Type: application/json' -d "{\"node_id\":\"$NODE_ID\"}"
+# stop sandbox children + service
+sudo systemctl stop 'prometeu-inf-*' 2>/dev/null
 sudo systemctl disable --now prometeu-node
+# remove files
+sudo rm -f /etc/systemd/system/prometeu-node.service
+sudo rm -rf /etc/systemd/system/prometeu-node.service.d
+sudo systemctl daemon-reload
 sudo rm -rf /opt/prometeu-node /etc/prometeu-node /var/lib/prometeu-node
 sudo rm -f /usr/local/bin/prometeu-node-apply-limits
 sudo userdel prometeu-inf
+# optional: also drop binaries + libs
+sudo rm -f /usr/local/bin/llama-server /usr/local/bin/rpc-server
+sudo rm -rf /opt/llama.cpp
 ```
