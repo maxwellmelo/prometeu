@@ -51,6 +51,34 @@ def test_warming_timeout_fails():
     assert "timed out" in (p.last_error or "")
 
 
+def test_warming_uses_per_pool_deadline_when_set():
+    # A large-model pool sets an explicit warming_deadline_sec well above the
+    # static default. It must NOT fail at the static default — download time
+    # for big GGUFs on slow links legitimately exceeds 600s.
+    p = _pool(min_peers=2, state=P.WARMING,
+              created=time.time() - (P.WARMING_TIMEOUT_SEC + 60))
+    p.warming_deadline_sec = P.WARMING_TIMEOUT_SEC + 1200
+    P.reconcile(p, set())
+    assert p.state == P.WARMING  # still within its own deadline
+
+
+def test_warming_fails_past_per_pool_deadline():
+    p = _pool(min_peers=2, state=P.WARMING)
+    p.warming_deadline_sec = 300
+    p.created_at = time.time() - 360
+    P.reconcile(p, set())
+    assert p.state == P.FAILED
+    assert "timed out" in (p.last_error or "")
+
+
+def test_warming_deadline_for_size_scales_with_bytes():
+    small = P.warming_deadline_for_size(file_size_bytes=200_000_000, min_peers=1)
+    large = P.warming_deadline_for_size(file_size_bytes=1_900_000_000, min_peers=2)
+    assert large > small
+    # Never below the static floor.
+    assert small >= P.WARMING_TIMEOUT_SEC
+
+
 def test_draining_to_stopped_when_empty():
     p = _pool(state=P.DRAINING)
     P.reconcile(p, {"a"})            # still one ready -> stays draining

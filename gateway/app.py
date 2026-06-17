@@ -1290,6 +1290,10 @@ async def api_pool_request(req: PoolRequest):
         context=req.context, min_peers=min_peers,
         gguf_url=report.get("url"), sha256=effective_sha,
         ram_per_peer_mb=ram_per_peer, state=poolmod.REQUESTED,
+        warming_deadline_sec=poolmod.warming_deadline_for_size(
+            int((report.get("metadata") or {}).get("file_size_bytes") or 0),
+            min_peers,
+        ),
     )
 
     # 2. Pick candidates and instruct them to load.

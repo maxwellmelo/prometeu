@@ -35,7 +35,29 @@ STOPPED = "STOPPED"
 FAILED = "FAILED"
 
 TERMINAL = {STOPPED, FAILED}
-WARMING_TIMEOUT_SEC = 600  # 10 min to reach quorum before FAILED
+WARMING_TIMEOUT_SEC = 600  # static floor: min time to reach quorum before FAILED
+# Assumed conservative per-peer download floor. Public nodes have wildly varied
+# uplinks; we budget for a slow one so a big GGUF on a 1 MB/s link is not failed
+# spuriously. Observed ~1.6 MB/s on the reference mesh, so 1 MB/s is a safe floor.
+WARMING_BANDWIDTH_FLOOR_BYTES_PER_SEC = 1_000_000
+WARMING_LOAD_OVERHEAD_SEC = 300  # RPC handshake + mmap + first-token after download
+
+
+def warming_deadline_for_size(file_size_bytes: int, min_peers: int) -> int:
+    """Size-aware warming deadline.
+
+    Warming time is dominated by each peer downloading the full GGUF. Peers
+    download in parallel, so wall-clock download time tracks a single peer's
+    transfer, not the sum — but a tensor-split pool only reaches quorum once the
+    SLOWEST of ``min_peers`` peers finishes, so we keep a small per-peer cushion.
+    Never returns below the static floor.
+    """
+    size = max(int(file_size_bytes or 0), 0)
+    download_sec = size / WARMING_BANDWIDTH_FLOOR_BYTES_PER_SEC
+    # Small per-extra-peer cushion for stragglers on a shared uplink.
+    straggler = max(int(min_peers) - 1, 0) * 0.25 * download_sec
+    budget = int(download_sec + straggler + WARMING_LOAD_OVERHEAD_SEC)
+    return max(budget, WARMING_TIMEOUT_SEC)
 
 
 @dataclass
@@ -54,6 +76,7 @@ class Pool:
     gguf_url: Optional[str] = None
     sha256: Optional[str] = None
     ram_per_peer_mb: Optional[int] = None
+    warming_deadline_sec: Optional[int] = None  # size-aware; falls back to static floor
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,7 +126,8 @@ def reconcile(pool: Pool, ready_node_ids: set[str], now: Optional[float] = None)
             if pool.state == REQUESTED:
                 pool.state = WARMING
             elapsed = now - pool.created_at
-            if pool.state == WARMING and elapsed > WARMING_TIMEOUT_SEC:
+            deadline = pool.warming_deadline_sec or WARMING_TIMEOUT_SEC
+            if pool.state == WARMING and elapsed > deadline:
                 pool.state = FAILED
                 pool.last_error = (
                     f"warming timed out after {int(elapsed)}s "
@@ -146,6 +170,7 @@ def select_warm_candidates(
 
 __all__ = [
     "Pool", "make_pool_id", "reconcile", "select_warm_candidates",
+    "warming_deadline_for_size",
     "REQUESTED", "WARMING", "READY", "DEGRADED", "DRAINING", "STOPPED", "FAILED",
     "TERMINAL", "WARMING_TIMEOUT_SEC",
 ]
