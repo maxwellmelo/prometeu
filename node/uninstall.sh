@@ -161,7 +161,8 @@ fi
 if [[ "$PURGE" -eq 1 ]]; then
     rm -rf "$DATA_DIR"
     rm -f  "$LLAMA_BIN" "$LLAMA_RPC_BIN"
-    ok "purged models ($DATA_DIR) and llama binaries"
+    rm -rf /opt/llama.cpp
+    ok "purged models ($DATA_DIR), llama binaries + shared libs (/opt/llama.cpp)"
 else
     if [[ -d "$DATA_DIR" ]]; then
         warn "kept models at $DATA_DIR ($(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)) — 'sudo rm -rf $DATA_DIR' to reclaim"

@@ -103,9 +103,24 @@ if [[ "${PROMETEU_SKIP_BINARIES:-0}" != "1" ]]; then
     log "refreshing llama binaries ($target)..."
     if curl -fSL "$url" -o "$tmp/$tarball"; then
         tar -xzf "$tmp/$tarball" -C "$tmp"
-        install -m 0755 "$tmp"/*/llama-server "$LLAMA_BIN" 2>/dev/null || install -m 0755 "$tmp"/llama-server "$LLAMA_BIN"
-        install -m 0755 "$tmp"/*/rpc-server "$LLAMA_RPC_BIN" 2>/dev/null || install -m 0755 "$tmp"/rpc-server "$LLAMA_RPC_BIN"
-        log "llama binaries refreshed"
+        payload="$(find "$tmp" -maxdepth 1 -type d -name 'prometeu-llama-*' | head -1)"
+        [[ -z "$payload" ]] && payload="$tmp"
+        if [[ -d "$payload/bin" ]] && ls "$payload/bin"/*.so* >/dev/null 2>&1; then
+            mkdir -p /opt/llama.cpp/build/bin
+            cp -a "$payload/bin"/*.so* /opt/llama.cpp/build/bin/
+            install -m 0755 "$payload/bin/llama-server" /opt/llama.cpp/build/bin/llama-server
+            install -m 0755 "$payload/bin/rpc-server"   /opt/llama.cpp/build/bin/rpc-server
+            ln -sf /opt/llama.cpp/build/bin/llama-server "$LLAMA_BIN"
+            ln -sf /opt/llama.cpp/build/bin/rpc-server   "$LLAMA_RPC_BIN"
+        else
+            install -m 0755 "$payload"/llama-server "$LLAMA_BIN" 2>/dev/null || true
+            install -m 0755 "$payload"/rpc-server "$LLAMA_RPC_BIN" 2>/dev/null || true
+        fi
+        if "$LLAMA_BIN" --version >/dev/null 2>&1; then
+            log "llama binaries refreshed + verified"
+        else
+            err "refreshed binaries fail to run (missing shared libs) — keeping was impossible; report incomplete tarball."
+        fi
     else
         err "could not refresh binaries for $target (keeping existing ones)."
         err "set PROMETEU_SKIP_BINARIES=1 to silence, or build manually (see node/README)."

@@ -321,7 +321,28 @@ def unload_model(model_id: str) -> dict[str, Any]:
 def sandbox_preflight() -> dict[str, Any]:
     """Reports whether the host can run inference workloads safely."""
     _ensure_dirs()
-    llama_server_bin = Path(LLAMA_SERVER_BIN).exists()
+    # Existence is not enough: the shipped llama-server is a thin stub that
+    # dlopen()s libllama-server-impl.so from its RUNPATH. If those shared libs
+    # are missing the file exists but cannot run — so actually exec --version.
+    # (No-fallback: a binary that can't run is a hard blocker, not "present".)
+    llama_server_bin = False
+    llama_server_error = None
+    if Path(LLAMA_SERVER_BIN).exists():
+        try:
+            subprocess.run(
+                [LLAMA_SERVER_BIN, "--version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=True,
+            )
+            llama_server_bin = True
+        except subprocess.CalledProcessError as e:
+            llama_server_error = (e.stderr or b"").decode(errors="replace").strip()[:200] or "exec failed"
+        except (OSError, subprocess.TimeoutExpired) as e:
+            llama_server_error = str(e)[:200]
+    else:
+        llama_server_error = f"{LLAMA_SERVER_BIN} not found"
     systemd_run = _systemd_available()
     sandbox_user = _sandbox_user_exists()
     models_dir_writable = os.access(MODELS_DIR, os.W_OK)
@@ -333,6 +354,7 @@ def sandbox_preflight() -> dict[str, Any]:
     )
     return {
         "llama_server_bin": llama_server_bin,
+        "llama_server_error": llama_server_error,
         "systemd_run": systemd_run,
         "sandbox_user": sandbox_user,
         "models_dir": str(MODELS_DIR),

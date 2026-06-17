@@ -87,10 +87,34 @@ install_llama_binaries() {
         return 1
     fi
     tar -xzf "$tmp/$tarball" -C "$tmp"
-    install -m 0755 "$tmp"/*/llama-server "$LLAMA_BIN" 2>/dev/null || install -m 0755 "$tmp"/llama-server "$LLAMA_BIN"
-    install -m 0755 "$tmp"/*/rpc-server "$LLAMA_RPC_BIN" 2>/dev/null || install -m 0755 "$tmp"/rpc-server "$LLAMA_RPC_BIN"
+    local payload
+    payload="$(find "$tmp" -maxdepth 1 -type d -name 'prometeu-llama-*' | head -1)"
+    [[ -z "$payload" ]] && payload="$tmp"
+    # The llama-server/rpc-server are thin stubs with RUNPATH=/opt/llama.cpp/build/bin;
+    # they dlopen libllama-server-impl.so etc from there. Install the shared libs to
+    # that exact path (preserving symlinks) so the stubs resolve them, then symlink
+    # the binaries into /usr/local/bin. No patchelf dependency, portable anywhere.
+    if [[ -d "$payload/bin" ]] && ls "$payload/bin"/*.so* >/dev/null 2>&1; then
+        mkdir -p /opt/llama.cpp/build/bin
+        cp -a "$payload/bin"/*.so* /opt/llama.cpp/build/bin/
+        install -m 0755 "$payload/bin/llama-server" /opt/llama.cpp/build/bin/llama-server
+        install -m 0755 "$payload/bin/rpc-server"   /opt/llama.cpp/build/bin/rpc-server
+        ln -sf /opt/llama.cpp/build/bin/llama-server "$LLAMA_BIN"
+        ln -sf /opt/llama.cpp/build/bin/rpc-server   "$LLAMA_RPC_BIN"
+    else
+        # Legacy tarball without shared libs — copy binaries directly (may fail at
+        # runtime if they need libllama-server-impl.so; that is a packaging bug).
+        install -m 0755 "$payload"/llama-server "$LLAMA_BIN"
+        install -m 0755 "$payload"/rpc-server "$LLAMA_RPC_BIN"
+    fi
     rm -rf "$tmp"
-    log "installed llama-server + rpc-server ($target)"
+    # Verify the binary actually runs (catches missing shared libs — the #1 packaging bug)
+    if ! "$LLAMA_BIN" --version >/dev/null 2>&1; then
+        err "llama-server installed but fails to run (missing shared libraries)."
+        err "the release tarball for $target is incomplete; report this. Node cannot serve."
+        return 1
+    fi
+    log "installed + verified llama-server + rpc-server ($target)"
 }
 
 # ---------------------------------------------------------------------------
